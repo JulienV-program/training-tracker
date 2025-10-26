@@ -15,6 +15,9 @@ api-sh:
 front-sh:
 	docker compose exec front sh
 
+db-sh:
+	docker compose exec db psql -U app -d app
+
 migrate:
 	docker compose exec api php bin/console doctrine:migrations:migrate -n
 

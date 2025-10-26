@@ -28,7 +28,6 @@ services:
     command: php-fpm
     environment:
       <<: *default-env
-      DATABASE_URL: "postgresql://app:app@db:5432/app?serverVersion=16&charset=utf8"
       REDIS_URL: "redis://cache:6379"
       MAILER_DSN: "smtp://mailhog:1025"
     volumes:
@@ -53,7 +52,6 @@ services:
     command: php bin/console messenger:consume async -vv
     environment:
       <<: *default-env
-      DATABASE_URL: "postgresql://app:app@db:5432/app?serverVersion=16&charset=utf8"
       REDIS_URL: "redis://cache:6379"
       MAILER_DSN: "smtp://mailhog:1025"
     volumes:

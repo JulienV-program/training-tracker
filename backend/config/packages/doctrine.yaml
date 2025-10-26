@@ -32,6 +32,11 @@ when@test:
         dbal:
             # "TEST_TOKEN" is typically set by ParaTest
             dbname_suffix: '_test%env(default::TEST_TOKEN)%'
+        orm:
+            auto_generate_proxy_classes: true
+            metadata_cache_driver: null
+            query_cache_driver: null
+            result_cache_driver: null
 
 when@prod:
     doctrine:

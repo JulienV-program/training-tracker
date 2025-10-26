@@ -1,35 +1,27 @@
-import { useState } from 'react'
-import reactLogo from './assets/react.svg'
-import viteLogo from '/vite.svg'
-import './App.css'
+import { useEffect, useState } from "react";
+import { fetchWorkouts, createWorkout } from "./api";
+import type { Workout } from "./api";
 
-function App() {
-  const [count, setCount] = useState(0)
+export default function App() {
+  const [list, setList] = useState<Workout[]>([]);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => { fetchWorkouts().then(d=>{setList(d); setLoading(false);}).catch(()=>setLoading(false)); }, []);
+
+  const add = async () => {
+    await createWorkout({ sport:'Running', name:'Tempo', duration:45, date:new Date().toISOString() });
+    setList(await fetchWorkouts());
+  };
 
   return (
-    <>
-      <div>
-        <a href="https://vite.dev" target="_blank">
-          <img src={viteLogo} className="logo" alt="Vite logo" />
-        </a>
-        <a href="https://react.dev" target="_blank">
-          <img src={reactLogo} className="logo react" alt="React logo" />
-        </a>
-      </div>
-      <h1>Vite + React</h1>
-      <div className="card">
-        <button onClick={() => setCount((count) => count + 1)}>
-          count is {count}
-        </button>
-        <p>
-          Edit <code>src/App.tsx</code> and save to test HMR
-        </p>
-      </div>
-      <p className="read-the-docs">
-        Click on the Vite and React logos to learn more
-      </p>
-    </>
-  )
+    <div style={{padding:16, fontFamily:'system-ui'}}>
+      <h1>Workouts</h1>
+      <button onClick={add}>+ Quick add</button>
+      {loading ? <p>Loading…</p> :
+        <ul>{list.map(w => (
+          <li key={w.id}>{new Date(w.date).toLocaleString()} — {w.sport} -- {w.name} — {w.duration}′</li>
+        ))}</ul>
+      }
+    </div>
+  );
 }
-
-export default App

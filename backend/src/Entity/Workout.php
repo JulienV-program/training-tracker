@@ -26,7 +26,7 @@ class Workout
     #[ORM\Column(type: Types::TEXT, nullable: true)]
     private ?string $notes = null;
 
-    #[ORM\ManyToOne(inversedBy: 'workouts')]
+    #[ORM\ManyToOne(inversedBy: 'workouts', cascade:['persist'])]
     private ?Sport $sport = null;
 
     public function getId(): ?int

@@ -19,7 +19,7 @@ export default function App() {
       <button onClick={add}>+ Quick add</button>
       {loading ? <p>Loading…</p> :
         <ul>{list.map(w => (
-          <li key={w.id}>{new Date(w.date).toLocaleString()} — {w.sport} -- {w.name} — {w.duration}′</li>
+          <li key={w.id}>{new Date(w.date.date).toLocaleString()} — {w.sport} -- {w.name} — {w.duration}′</li>
         ))}</ul>
       }
     </div>

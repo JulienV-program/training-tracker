@@ -3,11 +3,16 @@
 namespace App\Controller\Api;
 
 use App\Entity\Sport;
+use App\Dto\WorkoutDto;
 use App\Entity\Workout;
+use App\Mapper\WorkoutMapper;
 use App\Repository\SportRepository;
 use Doctrine\ORM\EntityManagerInterface;
+use Symfony\Component\HttpFoundation\Request;
 use Symfony\Component\Routing\Attribute\Route;
 use Symfony\Component\HttpFoundation\JsonResponse;
+use Symfony\Component\Serializer\SerializerInterface;
+use Symfony\Component\Validator\Validator\ValidatorInterface;
 use Symfony\Bundle\FrameworkBundle\Controller\AbstractController;
 
 #[Route('api/workouts')]
@@ -20,38 +25,32 @@ final class WorkoutController extends AbstractController
 
     #[Route('', methods: ['GET'])]
     public function list(): JsonResponse {
-        $items = $this->em->getRepository(Workout::class)->findBy([], ['date'=>'DESC'], 50);
-        $data = array_map(fn(Workout $w) => [
-            'id'=>$w->getId(),
-            'date'=>$w->getDate()->format(DATE_ATOM),
-            'sport'=>$w->getSport()->getName(),
-            'name'=>$w->getName(),
-            'duration'=>$w->getDuration(),
-            'notes'=>$w->getNotes(),
-        ], $items);
-        return new JsonResponse($data);
+        $workouts = $this->em->getRepository(Workout::class)->findBy([], ['date'=>'DESC'], 50);
+        $output = array_map(fn (Workout $w) => WorkoutMapper::toDto($w), $workouts);
+        return new JsonResponse($output);
     }
 
-    #[Route('', methods: ['POST'])]
-    public function create(): JsonResponse {
-        $payload = json_decode(file_get_contents('php://input'), true) ?? [];
-        $sport = $this->sportRepository->findOneByName($payload['sport']);
+ #[Route('', methods: ['POST'])]
+    public function create(
+        Request $request,
+        SerializerInterface $serializer,
+        ValidatorInterface $validator,
+        EntityManagerInterface $em
+    ): JsonResponse {
+        /** @var WorkoutDto $dto */
+        $dto = $serializer->deserialize($request->getContent(), WorkoutDto::class, 'json');
 
-        if($payload == [] || $sport == null) {
-            return new JsonResponse('bad payload', 300);
+        $errors = $validator->validate($dto);
+        if (count($errors) > 0) {
+            return $this->json($errors, 400);
         }
 
-        $w = (new Workout())
-            ->setDate(new \DateTimeImmutable($payload['date'] ?? 'now'))
-            ->setName($payload['name'])
-            ->setSport(($sport))
-            ->setDuration((int)($payload['duration'] ?? 60))
-            ->setNotes($payload['notes'] ?? null);
+        $workout = WorkoutMapper::fromDto($this->sportRepository, $dto);
 
-        $this->em->persist($w);
-        $this->em->flush();
+        $em->persist($workout);
+        $em->flush();
 
-        return new JsonResponse(['id'=>$w->getId()], 201);
-
+        return $this->json(WorkoutMapper::toDto($workout), 201);
     }
+
 }

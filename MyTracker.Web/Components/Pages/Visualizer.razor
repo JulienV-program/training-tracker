@@ -1,0 +1,32 @@
+﻿@page "/visualizer/{ActivityId}"
+@rendermode InteractiveServer
+@using MyTracker.Domain.Services
+@inject ActivityService ActivityService
+@inject IJSRuntime JS
+
+<PageTitle>Analyse Graphique</PageTitle>
+
+<div class="container mt-4">
+    <div class="d-flex justify-content-between">
+        <h3>📈 Analyse de la séance @ActivityId</h3>
+        <a href="/activities" class="btn btn-outline-secondary">Retour</a>
+    </div>
+
+    <div class="mt-4" style="height: 500px; background: #fff; padding: 20px; border-radius: 15px; shadow: 0 4px 6px rgba(0,0,0,0.1);">
+        <canvas id="stravaChart"></canvas>
+    </div>
+</div>
+
+@code {
+    [Parameter] public required string ActivityId { get; set; }
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (firstRender)
+        {
+            var (_, content) = await ActivityService.GetActivityCsvAsync(ActivityId);
+            var csvString = System.Text.Encoding.UTF8.GetString(content);
+            await JS.InvokeVoidAsync("renderStravaChart", csvString);
+        }
+    }
+}

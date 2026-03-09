@@ -1,0 +1,93 @@
+﻿@page "/"
+@rendermode InteractiveServer
+@using MyTracker.Domain.Interfaces
+@using MyTracker.Domain.Configurations
+@using MyTracker.Domain.Services
+@using MyTracker.Infrastructure.Csv
+@inject IActivityProvider StravaProvider
+@inject IActivityRepository CsvRepo
+@inject StravaSettings Settings
+@inject IJSRuntime JS
+@inject ActivityService ActivityService
+
+<PageTitle>MyTracker - Strava To CSV</PageTitle>
+
+<div class="container text-center mt-5">
+    <h1 class="display-4">🏃‍♂️ MyTracker</h1>
+    <p class="lead">Prêt pour ton débriefing Strava ?</p>
+
+    @if (isProcessing)
+    {
+        <div class="spinner-border text-primary" role="status"></div>
+        <p>Récupération des données haute résolution...</p>
+    }
+    else
+    {
+        <button class="btn btn-primary btn-lg shadow" @onclick="AnalyzeLastActivity">
+            Récupérer ma dernière séance
+        </button>
+    }
+
+    @if (!string.IsNullOrEmpty(statusMessage))
+    {
+        <div class="alert alert-info mt-4">@statusMessage</div>
+    }
+    @if (downloadReady)
+    {
+        <div class="mt-4">
+            <button class="btn btn-success btn-lg animate__animated animate__bounceIn" @onclick="DownloadCsv">
+                📥 Télécharger le CSV
+            </button>
+        </div>
+    }
+</div>
+
+<div class="card shadow-sm mb-4">
+    <div class="card-body">
+        <h5 class="card-title">Statut Strava</h5>
+        <p class="card-text">
+            <span class="badge @(isConnected ? "bg-success" : "bg-warning")">
+                @(isConnected ? "Connecté" : "Déconnecté")
+            </span>
+        </p>
+    </div>
+</div>
+
+@code {
+    private bool isConnected = false;
+    private bool isProcessing = false;
+    private string statusMessage = "";
+    private bool downloadReady = false;
+    private byte[]? csvContent;
+    private string currentFileName = "";
+    
+    protected override void OnInitialized()
+    {
+        // On vérifie si le fichier de token existe OU si on a un refresh token dans la config
+        isConnected = File.Exists("tokens.json") || !string.IsNullOrEmpty(Settings.RefreshToken);
+    }
+
+    private async Task AnalyzeLastActivity()
+    {
+        isProcessing = true;
+        try 
+        {
+            var result = await ActivityService.GetLatestActivityCsvAsync();
+            csvContent = result.Content;
+            currentFileName = result.FileName;
+            downloadReady = true;
+        }
+        catch (Exception ex) { Console.WriteLine($"❌ Erreur critique : {ex.Message}"); }
+        finally { isProcessing = false; }
+    }
+
+    private async Task DownloadCsv()
+    {
+        if (csvContent != null)
+        {
+            using var stream = new MemoryStream(csvContent);
+            using var streamRef = new DotNetStreamReference(stream);
+            await JS.InvokeVoidAsync("downloadFileFromStream", currentFileName, streamRef);
+        }
+    }
+}

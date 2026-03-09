@@ -1,0 +1,75 @@
+﻿@page "/activities"
+@rendermode InteractiveServer
+@using MyTracker.Domain.Services
+@inject ActivityService ActivityService
+@inject NavigationManager Nav
+
+<div class="container mt-4">
+    <div class="d-flex justify-content-between align-items-center mb-4">
+        <h1>🏃‍♂️ Mes Activités</h1>
+        <button class="btn btn-primary" @onclick="LoadActivities" disabled="@isLoading">
+            @(isLoading ? "Synchronisation..." : "🔄 Actualiser Strava")
+        </button>
+    </div>
+
+    @if (activities == null)
+    {
+        <div class="text-center py-5">
+            <p>Cliquez sur "Actualiser" pour récupérer vos séances.</p>
+        </div>
+    }
+    else
+    {
+        <div class="row">
+            @foreach (var act in activities)
+            {
+                <div class="col-md-6 col-lg-4 mb-3">
+                    <div class="card shadow-sm @(act.IsDownloaded ? "border-success" : "")">
+                        <div class="card-body">
+                            <h5 class="card-title text-truncate">@act.Name</h5>
+                            <p class="card-text text-muted small">
+                                📅 @act.Date.ToShortDateString() | 📏 @((act.Distance / 1000).ToString("F2")) km
+                            </p>
+                            
+                            <div class="d-flex gap-2">
+                                @if (act.IsDownloaded)
+                                {
+                                    <button class="btn btn-success w-100" @onclick='() => Nav.NavigateTo($"/visualizer/{act.Id}")'>
+                                        📊 Analyser
+                                    </button>
+                                }
+                                else
+                                {
+                                    <button class="btn btn-outline-primary w-100" @onclick="() => DownloadAndRefresh(act.Id)">
+                                        📥 Importer
+                                    </button>
+                                }
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            }
+        </div>
+    }
+</div>
+
+@code {
+    private List<ActivityService.ActivityViewModel>? activities;
+    private bool isLoading = false;
+
+    private async Task LoadActivities()
+    {
+        isLoading = true;
+        try {
+            activities = await ActivityService.GetActivitiesDashboardAsync();
+        } finally {
+            isLoading = false;
+        }
+    }
+
+    private async Task DownloadAndRefresh(string id)
+    {
+        await ActivityService.GetActivityCsvAsync(id); // Télécharge et stocke sur le Mac
+        await LoadActivities(); // Rafraîchit l'UI
+    }
+}

@@ -1,0 +1,18 @@
+{
+    "name": "C# VSCodium Dev Env",
+    "build": {
+        "dockerfile": "Dockerfile"
+    },
+    "customizations": {
+        "vscode": {
+            "extensions": [
+                "muhammad-sammy.csharp" // Extension C# compatible VSCodium
+            ]
+        }
+    },
+    "remoteUser": "vscode",
+    "containerEnv": {
+    "STRAVA_CLIENT_ID": "${localEnv:STRAVA_CLIENT_ID}",
+    "STRAVA_CLIENT_SECRET": "${localEnv:STRAVA_CLIENT_SECRET}"
+}
+}

@@ -1,0 +1,7 @@
+appsettings.json
+tokens.json
+*.csv
+*.tcx
+bin/
+obj/
+.vs/

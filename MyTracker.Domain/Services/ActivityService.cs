@@ -89,6 +89,24 @@ public class ActivityService(
         await repo.SaveActivitySummariesAsync(activities);
     }
 
+    public async Task<HomeDashboardViewModel> GetHomeDashboardAsync()
+    {
+        var cached = (await repo.GetCachedActivitiesAsync()).ToList();
+        var downloadedIds = (await repo.GetStoredActivityIdsAsync()).ToHashSet();
+        var now = DateTime.UtcNow;
+        var latest = cached.OrderByDescending(a => a.Date).FirstOrDefault();
+
+        return new HomeDashboardViewModel
+        {
+            TotalActivities = cached.Count,
+            TotalDistanceKm = cached.Sum(a => a.Distance) / 1000.0,
+            DistanceLast7DaysKm = cached.Where(a => a.Date >= now.AddDays(-7)).Sum(a => a.Distance) / 1000.0,
+            DistanceLast30DaysKm = cached.Where(a => a.Date >= now.AddDays(-30)).Sum(a => a.Distance) / 1000.0,
+            LatestActivity = latest,
+            LatestActivityIsDownloaded = latest != null && downloadedIds.Contains(latest.Id)
+        };
+    }
+
     public Task<UserProfile?> GetUserProfileAsync() => userProfileRepo.GetProfileAsync();
 
     public Task SaveUserProfileAsync(UserProfile profile) => userProfileRepo.SaveProfileAsync(profile);
@@ -119,5 +137,15 @@ public class ActivityService(
         public DateTime Date { get; set; }
         public double Distance { get; set; }
         public bool IsDownloaded { get; set; }
+    }
+
+    public class HomeDashboardViewModel
+    {
+        public int TotalActivities { get; set; }
+        public double TotalDistanceKm { get; set; }
+        public double DistanceLast7DaysKm { get; set; }
+        public double DistanceLast30DaysKm { get; set; }
+        public Activity? LatestActivity { get; set; }
+        public bool LatestActivityIsDownloaded { get; set; }
     }
 }

@@ -152,6 +152,24 @@ public class ActivityServiceTests
     }
 
     [Fact]
+    public async Task GetHomeDashboardAsync_ComputesTotalsAndPicksMostRecentActivity()
+    {
+        var oldActivity = MakeActivity("1") with { Date = DateTime.UtcNow.AddDays(-60), Distance = 10000 };
+        var recentActivity = MakeActivity("2") with { Date = DateTime.UtcNow.AddDays(-2), Distance = 5000 };
+        _repo.Setup(r => r.GetCachedActivitiesAsync()).ReturnsAsync([oldActivity, recentActivity]);
+        _repo.Setup(r => r.GetStoredActivityIdsAsync()).ReturnsAsync(["2"]);
+
+        var service = CreateService();
+        var dashboard = await service.GetHomeDashboardAsync();
+
+        Assert.Equal(2, dashboard.TotalActivities);
+        Assert.Equal(15.0, dashboard.TotalDistanceKm);
+        Assert.Equal(5.0, dashboard.DistanceLast7DaysKm); // seule l'activité récente entre dans la fenêtre 7j
+        Assert.Equal("2", dashboard.LatestActivity!.Id);
+        Assert.True(dashboard.LatestActivityIsDownloaded);
+    }
+
+    [Fact]
     public async Task SyncActivitiesListAsync_FetchesFromStravaAndSavesSummaries()
     {
         _provider.Setup(p => p.GetValidAccessTokenAsync()).ReturnsAsync("token");

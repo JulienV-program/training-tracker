@@ -22,6 +22,14 @@
         </span>
     </div>
 
+    @if (errorMessage != null)
+    {
+        <div class="alert alert-danger d-flex justify-content-between align-items-center">
+            <span>⚠️ @errorMessage</span>
+            <button type="button" class="btn-close" @onclick="() => errorMessage = null"></button>
+        </div>
+    }
+
     @if (dashboard == null)
     {
         <p>Chargement...</p>
@@ -118,6 +126,7 @@
     private bool isConnected;
     private bool isSyncing;
     private bool isImportingLatest;
+    private string? errorMessage;
     private ActivityService.HomeDashboardViewModel? dashboard;
 
     protected override async Task OnInitializedAsync()
@@ -129,10 +138,15 @@
     private async Task SyncFromStrava()
     {
         isSyncing = true;
+        errorMessage = null;
         try
         {
             await ActivityService.SyncActivitiesListAsync();
             dashboard = await ActivityService.GetHomeDashboardAsync();
+        }
+        catch (Exception ex)
+        {
+            errorMessage = $"Impossible de synchroniser avec Strava : {ex.Message}";
         }
         finally
         {
@@ -145,10 +159,15 @@
         if (dashboard?.LatestActivity == null) return;
 
         isImportingLatest = true;
+        errorMessage = null;
         try
         {
             await ActivityService.GetActivityDataPointsAsync(dashboard.LatestActivity.Id);
             dashboard = await ActivityService.GetHomeDashboardAsync();
+        }
+        catch (Exception ex)
+        {
+            errorMessage = $"Impossible d'importer cette activité : {ex.Message}";
         }
         finally
         {

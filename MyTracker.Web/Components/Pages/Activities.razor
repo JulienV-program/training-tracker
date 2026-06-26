@@ -12,6 +12,14 @@
         </button>
     </div>
 
+    @if (errorMessage != null)
+    {
+        <div class="alert alert-danger d-flex justify-content-between align-items-center">
+            <span>⚠️ @errorMessage</span>
+            <button type="button" class="btn-close" @onclick="() => errorMessage = null"></button>
+        </div>
+    }
+
     @if (activities == null)
     {
         <div class="text-center py-5">
@@ -65,6 +73,7 @@
 @code {
     private List<ActivityService.ActivityViewModel>? activities;
     private bool isLoading = false;
+    private string? errorMessage;
 
     protected override async Task OnInitializedAsync()
     {
@@ -78,27 +87,48 @@
     private async Task LoadActivities()
     {
         isLoading = true;
-        try {
+        errorMessage = null;
+        try
+        {
             await ActivityService.SyncActivitiesListAsync(); // Appel Strava, fusionne dans le cache local
             await RefreshFromCache();
-        } finally {
+        }
+        catch (Exception ex)
+        {
+            errorMessage = $"Impossible de synchroniser avec Strava : {ex.Message}";
+        }
+        finally
+        {
             isLoading = false;
         }
     }
 
     private async Task DownloadAndRefresh(string id)
     {
-        await ActivityService.GetActivityCsvAsync(id); // Télécharge et stocke sur le Mac
-        await RefreshFromCache(); // Rafraîchit l'UI depuis le cache, pas de nouvel appel Strava
+        errorMessage = null;
+        try
+        {
+            await ActivityService.GetActivityCsvAsync(id); // Télécharge et stocke sur le Mac
+            await RefreshFromCache(); // Rafraîchit l'UI depuis le cache, pas de nouvel appel Strava
+        }
+        catch (Exception ex)
+        {
+            errorMessage = $"Impossible d'importer cette activité : {ex.Message}";
+        }
     }
 
     private async Task ReimportActivity(string id)
     {
         isLoading = true;
+        errorMessage = null;
         try
         {
             await ActivityService.GetActivityDataPointsAsync(id, forceReimport: true);
             await RefreshFromCache();
+        }
+        catch (Exception ex)
+        {
+            errorMessage = $"Impossible de réimporter cette activité : {ex.Message}";
         }
         finally
         {

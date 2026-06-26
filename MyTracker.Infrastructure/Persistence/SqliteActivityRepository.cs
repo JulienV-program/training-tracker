@@ -7,8 +7,11 @@ namespace MyTracker.Infrastructure.Persistence;
 
 public class SqliteActivityRepository(TrainingTrackerDbContext db) : IActivityRepository
 {
+    // Une activité simplement listée (synchro de liste) n'est pas "en cache" tant qu'elle n'a pas
+    // été importée en détail (streams/laps/splits) - sinon GetActivityDataPointsAsync croit à tort
+    // qu'elle est déjà disponible localement et ne rappelle jamais Strava.
     public async Task<bool> ExistsAsync(string activityId)
-        => await db.Activities.AnyAsync(a => a.Id == activityId);
+        => await db.Activities.AnyAsync(a => a.Id == activityId && a.IsFullyImported);
 
     public async Task SaveActivityAsync(Activity activity)
     {

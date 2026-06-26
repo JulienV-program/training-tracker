@@ -79,6 +79,17 @@ public class SqliteActivityRepositoryTests : IDisposable
     }
 
     [Fact]
+    public async Task ExistsAsync_ReturnsFalse_ForActivityOnlySyncedAsSummary()
+    {
+        // Régression : une activité juste listée (synchro Strava) ne doit jamais être considérée
+        // "en cache" tant qu'elle n'a pas été réellement importée (streams/laps/splits) — sinon
+        // GetActivityDataPointsAsync ne rappelle jamais Strava et renvoie une liste de points vide.
+        await _repo.SaveActivitySummariesAsync([MakeActivity("1")]);
+
+        Assert.False(await _repo.ExistsAsync("1"));
+    }
+
+    [Fact]
     public async Task SaveDataPointsAsync_ReplacesExistingPoints_OnSecondCall()
     {
         await _repo.SaveActivityAsync(MakeActivity());

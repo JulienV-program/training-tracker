@@ -14,11 +14,18 @@ public record Activity(
     double? MaxWatts,
     double? AverageCadence,
     double? Calories,
-    double? SufferScore     // L'indice d'effort Strava
+    double? SufferScore,    // L'indice d'effort Strava
+    double? AverageSpeed = null,
+    double? MaxSpeed = null,
+    double? StartLat = null,
+    double? StartLng = null,
+    double? EndLat = null,
+    double? EndLng = null,
+    string? MapPolyline = null
 )
 {
     public double AveragePace => MovingTime > 0 ? (MovingTime / 60.0) / (Distance / 1000.0) : 0;
     public string FormattedDuration => TimeSpan.FromSeconds(MovingTime).ToString(@"hh\:mm\:ss");
 
-    public DateTime StartDateLocal { get; internal set; }
+    public DateTime StartDateLocal { get; set; }
 }

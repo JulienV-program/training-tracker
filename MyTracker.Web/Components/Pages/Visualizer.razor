@@ -1,6 +1,7 @@
-﻿@page "/visualizer/{ActivityId}"
+@page "/visualizer/{ActivityId}"
 @rendermode InteractiveServer
 @using MyTracker.Domain.Services
+@using System.Text.Json
 @inject ActivityService ActivityService
 @inject IJSRuntime JS
 
@@ -12,21 +13,115 @@
         <a href="/activities" class="btn btn-outline-secondary">Retour</a>
     </div>
 
-    <div class="mt-4" style="height: 500px; background: #fff; padding: 20px; border-radius: 15px; shadow: 0 4px 6px rgba(0,0,0,0.1);">
+    <div class="mt-4" style="height: 500px; background: #fff; padding: 20px; border-radius: 15px; box-shadow: 0 4px 6px rgba(0,0,0,0.1);">
         <canvas id="stravaChart"></canvas>
     </div>
+
+    <div class="mt-4" style="height: 350px; background: #fff; padding: 20px; border-radius: 15px; box-shadow: 0 4px 6px rgba(0,0,0,0.1);">
+        <canvas id="splitsChart"></canvas>
+    </div>
+
+    <div class="mt-4 text-center" style="background: #fff; padding: 20px; border-radius: 15px; box-shadow: 0 4px 6px rgba(0,0,0,0.1);">
+        <h5 class="mb-3">🗺️ Tracé du parcours</h5>
+        <canvas id="routeShapeCanvas" width="500" height="500" style="max-width: 100%;"></canvas>
+    </div>
+
+    @if (commentary != null || isGeneratingCommentary)
+    {
+        <div class="card mt-4">
+            <div class="card-header">🤖 Analyse Coach IA</div>
+            <div class="card-body">
+                @if (isGeneratingCommentary)
+                {
+                    <em>Génération en cours...</em>
+                }
+                else
+                {
+                    <p style="white-space: pre-wrap;">@commentary</p>
+                    <button class="btn btn-sm btn-outline-secondary" @onclick="RegenerateCommentary">🔄 Régénérer</button>
+                }
+            </div>
+        </div>
+    }
 </div>
 
 @code {
     [Parameter] public required string ActivityId { get; set; }
 
+    private string? commentary;
+    private bool isGeneratingCommentary;
+
+    private static readonly JsonSerializerOptions JsonOptions = new() { PropertyNamingPolicy = JsonNamingPolicy.CamelCase };
+
     protected override async Task OnAfterRenderAsync(bool firstRender)
     {
-        if (firstRender)
+        if (!firstRender) return;
+
+        var dataPoints = (await ActivityService.GetActivityDataPointsAsync(ActivityId)).ToList();
+        var activity = await ActivityService.GetCachedActivityAsync(ActivityId);
+
+        // Strava renvoie la cadence course à pied pour une seule jambe : on double pour obtenir les pas/minute réels
+        var isRunningActivity = activity?.Type is "Run" or "TrailRun" or "VirtualRun" or "Walk" or "Hike";
+        var (speedLabel, speedUnit) = GetSpeedMeta(activity?.Type);
+
+        var chartPoints = dataPoints.Select(p => p with
         {
-            var (_, content) = await ActivityService.GetActivityCsvAsync(ActivityId);
-            var csvString = System.Text.Encoding.UTF8.GetString(content);
-            await JS.InvokeVoidAsync("renderStravaChart", csvString);
+            Cadence = isRunningActivity && p.Cadence.HasValue ? p.Cadence * 2 : p.Cadence,
+            Velocity = ConvertSpeed(p.Velocity, speedUnit)
+        });
+
+        var json = JsonSerializer.Serialize(chartPoints, JsonOptions);
+        await JS.InvokeVoidAsync("renderStravaChart", json, speedLabel, speedUnit);
+
+        var splits = (await ActivityService.GetActivitySplitsAsync(ActivityId))
+            .Select(s => s with { AverageSpeed = ConvertSpeed(s.AverageSpeed, speedUnit) ?? 0 });
+        await JS.InvokeVoidAsync("renderSplitsChart", JsonSerializer.Serialize(splits, JsonOptions), speedLabel, speedUnit);
+
+        var route = dataPoints.Where(p => p.Lat.HasValue && p.Lng.HasValue).Select(p => new { p.Lat, p.Lng });
+        await JS.InvokeVoidAsync("renderRouteShape", JsonSerializer.Serialize(route, JsonOptions));
+
+        await GenerateCommentaryAsync(forceRegenerate: false);
+    }
+
+    // Vitesse/allure affichée différemment selon le type de sport : km/h à vélo, min/km à pied, min/100m en natation
+    private static (string Label, string Unit) GetSpeedMeta(string? type) => type switch
+    {
+        "Ride" or "VirtualRide" or "EBikeRide" or "Velomobile" => ("Vitesse (km/h)", "kmh"),
+        "Run" or "TrailRun" or "VirtualRun" or "Walk" or "Hike" => ("Allure (min/km)", "minkm"),
+        "Swim" => ("Allure (min/100m)", "min100m"),
+        _ => ("Allure (m/s)", "ms")
+    };
+
+    private static double? ConvertSpeed(double? metersPerSecond, string unit)
+    {
+        if (!metersPerSecond.HasValue || metersPerSecond <= 0) return null;
+        return unit switch
+        {
+            "kmh" => metersPerSecond * 3.6,
+            "minkm" => (1000.0 / metersPerSecond.Value) / 60.0,
+            "min100m" => (100.0 / metersPerSecond.Value) / 60.0,
+            _ => metersPerSecond
+        };
+    }
+
+    private async Task RegenerateCommentary() => await GenerateCommentaryAsync(forceRegenerate: true);
+
+    private async Task GenerateCommentaryAsync(bool forceRegenerate)
+    {
+        isGeneratingCommentary = true;
+        StateHasChanged();
+        try
+        {
+            commentary = await ActivityService.GetOrGenerateCommentaryAsync(ActivityId, forceRegenerate);
+        }
+        catch (Exception ex)
+        {
+            commentary = $"Impossible de générer le commentaire IA : {ex.Message}";
+        }
+        finally
+        {
+            isGeneratingCommentary = false;
+            StateHasChanged();
         }
     }
 }

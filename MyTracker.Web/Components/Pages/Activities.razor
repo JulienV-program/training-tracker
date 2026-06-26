@@ -37,6 +37,9 @@
                                     <button class="btn btn-success w-100" @onclick='() => Nav.NavigateTo($"/visualizer/{act.Id}")'>
                                         📊 Analyser
                                     </button>
+                                    <button class="btn btn-outline-secondary" title="Réimporter" disabled="@isLoading" @onclick="() => ReimportActivity(act.Id)">
+                                        🔄
+                                    </button>
                                 }
                                 else
                                 {
@@ -71,5 +74,19 @@
     {
         await ActivityService.GetActivityCsvAsync(id); // Télécharge et stocke sur le Mac
         await LoadActivities(); // Rafraîchit l'UI
+    }
+
+    private async Task ReimportActivity(string id)
+    {
+        isLoading = true;
+        try
+        {
+            await ActivityService.GetActivityDataPointsAsync(id, forceReimport: true);
+            await LoadActivities();
+        }
+        finally
+        {
+            isLoading = false;
+        }
     }
 }

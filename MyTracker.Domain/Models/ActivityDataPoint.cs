@@ -8,5 +8,9 @@ public record ActivityDataPoint(
     double? Cadence,        // RPM
     double? Altitude,       // En mètres
     double? Grade,          // Pente en %
-    double? Velocity        // m/s
+    double? Velocity,       // m/s
+    double? Lat = null,         // Latitude GPS
+    double? Lng = null,         // Longitude GPS
+    bool? Moving = null,        // En mouvement ou en pause
+    double? Temperature = null  // °C
 );

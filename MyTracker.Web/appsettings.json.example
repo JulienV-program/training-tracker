@@ -1,0 +1,22 @@
+{
+  "Logging": {
+    "LogLevel": {
+      "Default": "Information",
+      "Microsoft.AspNetCore": "Warning"
+    }
+  },
+  "AllowedHosts": "*",
+  "Strava": {
+    "ClientId": "<your-strava-client-id>",
+    "ClientSecret": "<your-strava-client-secret>",
+    "RefreshToken": "<your-strava-refresh-token>"
+  },
+  "Ollama": {
+    "BaseUrl": "http://localhost:11434",
+    "Model": "qwen2.5:7b-instruct",
+    "TimeoutSeconds": 120
+  },
+  "ConnectionStrings": {
+    "TrainingTrackerDb": "Data Source=~/.trainingtracker/trainingtracker.db"
+  }
+}

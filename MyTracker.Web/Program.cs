@@ -33,6 +33,7 @@ builder.Services.AddHttpClient<IActivityProvider, StravaProvider>();
 builder.Services.AddHttpClient<IOllamaService, OllamaClient>();
 builder.Services.AddScoped<IActivityRepository, SqliteActivityRepository>();
 builder.Services.AddScoped<IActivityCommentaryRepository, SqliteActivityCommentaryRepository>();
+builder.Services.AddScoped<IUserProfileRepository, SqliteUserProfileRepository>();
 builder.Services.AddSingleton<ICsvExportService, CsvExportService>();
 builder.Services.AddScoped<ActivityService>();
 

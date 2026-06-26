@@ -4,5 +4,5 @@ namespace MyTracker.Domain.Interfaces;
 
 public interface IOllamaService
 {
-    Task<string> GenerateCommentaryAsync(Activity activity, IEnumerable<ActivityDataPoint> dataPoints, CancellationToken ct = default);
+    Task<string> GenerateCommentaryAsync(Activity activity, IEnumerable<ActivityDataPoint> dataPoints, UserProfile? profile, CancellationToken ct = default);
 }

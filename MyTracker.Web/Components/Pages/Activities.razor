@@ -15,7 +15,13 @@
     @if (activities == null)
     {
         <div class="text-center py-5">
-            <p>Cliquez sur "Actualiser" pour récupérer vos séances.</p>
+            <p>Chargement...</p>
+        </div>
+    }
+    else if (activities.Count == 0)
+    {
+        <div class="text-center py-5">
+            <p>Aucune activité en cache. Cliquez sur "Actualiser" pour récupérer vos séances depuis Strava.</p>
         </div>
     }
     else
@@ -60,11 +66,21 @@
     private List<ActivityService.ActivityViewModel>? activities;
     private bool isLoading = false;
 
+    protected override async Task OnInitializedAsync()
+    {
+        // Lecture depuis le cache local SQLite, aucun appel Strava ici
+        activities = await ActivityService.GetActivitiesDashboardAsync();
+    }
+
+    private async Task RefreshFromCache()
+        => activities = await ActivityService.GetActivitiesDashboardAsync();
+
     private async Task LoadActivities()
     {
         isLoading = true;
         try {
-            activities = await ActivityService.GetActivitiesDashboardAsync();
+            await ActivityService.SyncActivitiesListAsync(); // Appel Strava, fusionne dans le cache local
+            await RefreshFromCache();
         } finally {
             isLoading = false;
         }
@@ -73,7 +89,7 @@
     private async Task DownloadAndRefresh(string id)
     {
         await ActivityService.GetActivityCsvAsync(id); // Télécharge et stocke sur le Mac
-        await LoadActivities(); // Rafraîchit l'UI
+        await RefreshFromCache(); // Rafraîchit l'UI depuis le cache, pas de nouvel appel Strava
     }
 
     private async Task ReimportActivity(string id)
@@ -82,7 +98,7 @@
         try
         {
             await ActivityService.GetActivityDataPointsAsync(id, forceReimport: true);
-            await LoadActivities();
+            await RefreshFromCache();
         }
         finally
         {

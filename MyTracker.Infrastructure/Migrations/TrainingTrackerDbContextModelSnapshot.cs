@@ -127,6 +127,9 @@ namespace MyTracker.Infrastructure.Migrations
                     b.Property<double?>("EndLng")
                         .HasColumnType("REAL");
 
+                    b.Property<bool>("IsFullyImported")
+                        .HasColumnType("INTEGER");
+
                     b.Property<string>("MapPolyline")
                         .HasColumnType("TEXT");
 
@@ -262,6 +265,45 @@ namespace MyTracker.Infrastructure.Migrations
                         .IsUnique();
 
                     b.ToTable("ActivitySplits");
+                });
+
+            modelBuilder.Entity("MyTracker.Infrastructure.Persistence.Entities.UserProfileEntity", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("INTEGER");
+
+                    b.Property<int>("Age")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<double?>("CriticalSwimSpeedMinPer100m")
+                        .HasColumnType("REAL");
+
+                    b.Property<double?>("FtpWatts")
+                        .HasColumnType("REAL");
+
+                    b.Property<double>("HeightCm")
+                        .HasColumnType("REAL");
+
+                    b.Property<int>("MaxHeartRate")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<int>("RestingHeartRate")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("Sex")
+                        .IsRequired()
+                        .HasColumnType("TEXT");
+
+                    b.Property<double?>("VmaMinPerKm")
+                        .HasColumnType("REAL");
+
+                    b.Property<double>("WeightKg")
+                        .HasColumnType("REAL");
+
+                    b.HasKey("Id");
+
+                    b.ToTable("UserProfile");
                 });
 #pragma warning restore 612, 618
         }

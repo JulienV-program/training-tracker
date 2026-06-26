@@ -13,4 +13,6 @@ public interface IActivityRepository
     Task SaveActivityDetailAsync(ActivityDetail detail);
     Task<IEnumerable<ActivityLap>> GetLapsAsync(string activityId);
     Task<IEnumerable<ActivitySplit>> GetSplitsAsync(string activityId);
+    Task SaveActivitySummariesAsync(IEnumerable<Activity> activities);
+    Task<IEnumerable<Activity>> GetCachedActivitiesAsync();
 }

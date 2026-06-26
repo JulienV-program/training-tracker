@@ -129,4 +129,45 @@ public class SqliteActivityRepositoryTests : IDisposable
         Assert.Contains("2", ids);
         Assert.Equal(2, ids.Count);
     }
+
+    [Fact]
+    public async Task GetStoredActivityIdsAsync_ExcludesActivitiesOnlySyncedAsSummary()
+    {
+        await _repo.SaveActivitySummariesAsync([MakeActivity("1")]); // jamais importée en détail
+        await _repo.SaveActivityAsync(MakeActivity("2")); // import complet
+
+        var ids = (await _repo.GetStoredActivityIdsAsync()).ToList();
+
+        Assert.DoesNotContain("1", ids);
+        Assert.Contains("2", ids);
+    }
+
+    [Fact]
+    public async Task SaveActivitySummariesAsync_NeverDowngradesAlreadyFullyImportedActivity()
+    {
+        await _repo.SaveActivityAsync(MakeActivity("1")); // import complet -> IsFullyImported = true
+
+        await _repo.SaveActivitySummariesAsync([MakeActivity("1") with { Name = "Renamed by sync" }]);
+
+        var ids = (await _repo.GetStoredActivityIdsAsync()).ToList();
+        Assert.Contains("1", ids); // toujours marquée comme importée après une simple synchro de liste
+
+        var loaded = await _repo.GetActivityAsync("1");
+        Assert.Equal("Renamed by sync", loaded!.Name); // les champs résumé sont bien mis à jour
+    }
+
+    [Fact]
+    public async Task GetCachedActivitiesAsync_ReturnsAllActivities_OrderedByDateDescending()
+    {
+        await _repo.SaveActivitySummariesAsync([
+            MakeActivity("1") with { Date = new DateTime(2026, 1, 1) },
+            MakeActivity("2") with { Date = new DateTime(2026, 2, 1) }
+        ]);
+
+        var cached = (await _repo.GetCachedActivitiesAsync()).ToList();
+
+        Assert.Equal(2, cached.Count);
+        Assert.Equal("2", cached[0].Id); // la plus récente en premier
+        Assert.Equal("1", cached[1].Id);
+    }
 }

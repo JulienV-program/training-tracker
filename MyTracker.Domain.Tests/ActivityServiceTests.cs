@@ -14,10 +14,11 @@ public class ActivityServiceTests
     private readonly Mock<ICsvExportService> _csvExportService = new();
     private readonly Mock<IActivityCommentaryRepository> _commentaryRepo = new();
     private readonly Mock<IOllamaService> _ollama = new();
+    private readonly Mock<IUserProfileRepository> _userProfileRepo = new();
     private readonly OllamaSettings _ollamaSettings = new() { Model = "test-model" };
 
     private ActivityService CreateService() => new(
-        _provider.Object, _repo.Object, _csvExportService.Object, _commentaryRepo.Object, _ollama.Object, _ollamaSettings);
+        _provider.Object, _repo.Object, _csvExportService.Object, _commentaryRepo.Object, _ollama.Object, _ollamaSettings, _userProfileRepo.Object);
 
     private static Activity MakeActivity(string id = "123") => new(
         id, "Test Run", DateTime.UtcNow, "Run", 5000, 1800, 50,
@@ -96,7 +97,7 @@ public class ActivityServiceTests
         var result = await service.GetOrGenerateCommentaryAsync("123");
 
         Assert.Equal("commentaire en cache", result);
-        _ollama.Verify(o => o.GenerateCommentaryAsync(It.IsAny<Activity>(), It.IsAny<IEnumerable<ActivityDataPoint>>(), It.IsAny<CancellationToken>()), Times.Never);
+        _ollama.Verify(o => o.GenerateCommentaryAsync(It.IsAny<Activity>(), It.IsAny<IEnumerable<ActivityDataPoint>>(), It.IsAny<UserProfile?>(), It.IsAny<CancellationToken>()), Times.Never);
     }
 
     [Fact]
@@ -107,7 +108,9 @@ public class ActivityServiceTests
         _repo.Setup(r => r.GetActivityAsync("123")).ReturnsAsync(activity);
         var points = new List<ActivityDataPoint> { new(0, 0, 100, null, null, null, null, null) };
         _repo.Setup(r => r.GetDataPointsAsync("123")).ReturnsAsync(points);
-        _ollama.Setup(o => o.GenerateCommentaryAsync(activity, points, It.IsAny<CancellationToken>()))
+        var profile = new UserProfile(30, "Homme", 180, 75, 190, 55);
+        _userProfileRepo.Setup(p => p.GetProfileAsync()).ReturnsAsync(profile);
+        _ollama.Setup(o => o.GenerateCommentaryAsync(activity, points, profile, It.IsAny<CancellationToken>()))
             .ReturnsAsync("nouveau commentaire");
 
         var service = CreateService();
@@ -123,7 +126,7 @@ public class ActivityServiceTests
         var activity = MakeActivity();
         _repo.Setup(r => r.GetActivityAsync("123")).ReturnsAsync(activity);
         _repo.Setup(r => r.GetDataPointsAsync("123")).ReturnsAsync([]);
-        _ollama.Setup(o => o.GenerateCommentaryAsync(activity, It.IsAny<IEnumerable<ActivityDataPoint>>(), It.IsAny<CancellationToken>()))
+        _ollama.Setup(o => o.GenerateCommentaryAsync(activity, It.IsAny<IEnumerable<ActivityDataPoint>>(), It.IsAny<UserProfile?>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync("régénéré");
 
         var service = CreateService();
@@ -134,10 +137,9 @@ public class ActivityServiceTests
     }
 
     [Fact]
-    public async Task GetActivitiesDashboardAsync_MarksIsDownloaded_BasedOnStoredIds()
+    public async Task GetActivitiesDashboardAsync_MarksIsDownloaded_BasedOnStoredIds_FromLocalCacheOnly()
     {
-        _provider.Setup(p => p.GetValidAccessTokenAsync()).ReturnsAsync("token");
-        _provider.Setup(p => p.GetActivitiesAsync("token")).ReturnsAsync([MakeActivity("1"), MakeActivity("2")]);
+        _repo.Setup(r => r.GetCachedActivitiesAsync()).ReturnsAsync([MakeActivity("1"), MakeActivity("2")]);
         _repo.Setup(r => r.GetStoredActivityIdsAsync()).ReturnsAsync(["1"]);
 
         var service = CreateService();
@@ -145,6 +147,21 @@ public class ActivityServiceTests
 
         Assert.True(dashboard.Single(a => a.Id == "1").IsDownloaded);
         Assert.False(dashboard.Single(a => a.Id == "2").IsDownloaded);
+        _provider.Verify(p => p.GetActivitiesAsync(It.IsAny<string>()), Times.Never);
+        _provider.Verify(p => p.GetValidAccessTokenAsync(), Times.Never);
+    }
+
+    [Fact]
+    public async Task SyncActivitiesListAsync_FetchesFromStravaAndSavesSummaries()
+    {
+        _provider.Setup(p => p.GetValidAccessTokenAsync()).ReturnsAsync("token");
+        var activities = new List<Activity> { MakeActivity("1"), MakeActivity("2") };
+        _provider.Setup(p => p.GetActivitiesAsync("token")).ReturnsAsync(activities);
+
+        var service = CreateService();
+        await service.SyncActivitiesListAsync();
+
+        _repo.Verify(r => r.SaveActivitySummariesAsync(activities), Times.Once);
     }
 
     [Fact]

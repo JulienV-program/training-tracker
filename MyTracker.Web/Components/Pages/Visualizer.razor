@@ -21,9 +21,9 @@
         <canvas id="splitsChart"></canvas>
     </div>
 
-    <div class="mt-4 text-center" style="background: #fff; padding: 20px; border-radius: 15px; box-shadow: 0 4px 6px rgba(0,0,0,0.1);">
+    <div class="mt-4" style="background: #fff; padding: 20px; border-radius: 15px; box-shadow: 0 4px 6px rgba(0,0,0,0.1);">
         <h5 class="mb-3">🗺️ Tracé du parcours</h5>
-        <canvas id="routeShapeCanvas" width="500" height="500" style="max-width: 100%;"></canvas>
+        <div id="routeMap" style="height: 400px; border-radius: 8px;"></div>
     </div>
 
     @if (commentary != null || isGeneratingCommentary)
@@ -78,7 +78,7 @@
         await JS.InvokeVoidAsync("renderSplitsChart", JsonSerializer.Serialize(splits, JsonOptions), speedLabel, speedUnit);
 
         var route = dataPoints.Where(p => p.Lat.HasValue && p.Lng.HasValue).Select(p => new { p.Lat, p.Lng });
-        await JS.InvokeVoidAsync("renderRouteShape", JsonSerializer.Serialize(route, JsonOptions));
+        await JS.InvokeVoidAsync("renderRouteMap", JsonSerializer.Serialize(route, JsonOptions));
 
         await GenerateCommentaryAsync(forceRegenerate: false);
     }

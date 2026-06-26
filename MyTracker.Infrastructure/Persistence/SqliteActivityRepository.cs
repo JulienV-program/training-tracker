@@ -33,8 +33,69 @@ public class SqliteActivityRepository(TrainingTrackerDbContext db) : IActivityRe
         entity.AverageCadence = activity.AverageCadence;
         entity.Calories = activity.Calories;
         entity.SufferScore = activity.SufferScore;
+        entity.IsFullyImported = true;
 
         await db.SaveChangesAsync();
+    }
+
+    public async Task SaveActivitySummariesAsync(IEnumerable<Activity> activities)
+    {
+        foreach (var activity in activities)
+        {
+            var entity = await db.Activities.FindAsync(activity.Id);
+            if (entity == null)
+            {
+                entity = new ActivityEntity { Id = activity.Id };
+                db.Activities.Add(entity);
+            }
+
+            entity.Name = activity.Name;
+            entity.Date = activity.Date;
+            entity.Type = activity.Type;
+            entity.Distance = activity.Distance;
+            entity.MovingTime = activity.MovingTime;
+            entity.ElevationGain = activity.ElevationGain;
+            entity.AverageHeartRate = activity.AverageHeartRate;
+            entity.MaxHeartRate = activity.MaxHeartRate;
+            entity.AverageWatts = activity.AverageWatts;
+            entity.MaxWatts = activity.MaxWatts;
+            entity.AverageCadence = activity.AverageCadence;
+            entity.Calories = activity.Calories;
+            entity.SufferScore = activity.SufferScore;
+            // IsFullyImported volontairement non modifié : une simple synchro de liste ne doit jamais
+            // "downgrader" une activité déjà importée en détail (streams/laps/splits).
+        }
+
+        await db.SaveChangesAsync();
+    }
+
+    public async Task<IEnumerable<Activity>> GetCachedActivitiesAsync()
+    {
+        return await db.Activities
+            .OrderByDescending(a => a.Date)
+            .Select(entity => new Activity(
+                entity.Id,
+                entity.Name,
+                entity.Date,
+                entity.Type,
+                entity.Distance,
+                entity.MovingTime,
+                entity.ElevationGain,
+                entity.AverageHeartRate,
+                entity.MaxHeartRate,
+                entity.AverageWatts,
+                entity.MaxWatts,
+                entity.AverageCadence,
+                entity.Calories,
+                entity.SufferScore,
+                entity.AverageSpeed,
+                entity.MaxSpeed,
+                entity.StartLat,
+                entity.StartLng,
+                entity.EndLat,
+                entity.EndLng,
+                entity.MapPolyline))
+            .ToListAsync();
     }
 
     public async Task SaveActivityDetailAsync(ActivityDetail detail)
@@ -166,7 +227,7 @@ public class SqliteActivityRepository(TrainingTrackerDbContext db) : IActivityRe
     }
 
     public async Task<IEnumerable<string>> GetStoredActivityIdsAsync()
-        => await db.Activities.Select(a => a.Id).ToListAsync();
+        => await db.Activities.Where(a => a.IsFullyImported).Select(a => a.Id).ToListAsync();
 
     public async Task<IEnumerable<ActivityLap>> GetLapsAsync(string activityId)
         => await db.ActivityLaps

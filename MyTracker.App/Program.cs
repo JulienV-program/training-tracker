@@ -30,9 +30,10 @@ db.Database.Migrate();
 var activityRepo = new SqliteActivityRepository(db);
 var commentaryRepo = new SqliteActivityCommentaryRepository(db);
 var csvExportService = new CsvExportService();
+var userProfileRepo = new SqliteUserProfileRepository(db);
 
 // 3. Le Chef d'Orchestre (On lui donne ses outils)
-var activityService = new ActivityService(stravaProvider, activityRepo, csvExportService, commentaryRepo, ollamaClient, ollamaSettings);
+var activityService = new ActivityService(stravaProvider, activityRepo, csvExportService, commentaryRepo, ollamaClient, ollamaSettings, userProfileRepo);
 
 try
 {

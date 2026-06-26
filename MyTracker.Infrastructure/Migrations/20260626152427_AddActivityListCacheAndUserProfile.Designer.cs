@@ -2,6 +2,7 @@
 using System;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
+using Microsoft.EntityFrameworkCore.Migrations;
 using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 using MyTracker.Infrastructure.Persistence;
 
@@ -10,9 +11,11 @@ using MyTracker.Infrastructure.Persistence;
 namespace MyTracker.Infrastructure.Migrations
 {
     [DbContext(typeof(TrainingTrackerDbContext))]
-    partial class TrainingTrackerDbContextModelSnapshot : ModelSnapshot
+    [Migration("20260626152427_AddActivityListCacheAndUserProfile")]
+    partial class AddActivityListCacheAndUserProfile
     {
-        protected override void BuildModel(ModelBuilder modelBuilder)
+        /// <inheritdoc />
+        protected override void BuildTargetModel(ModelBuilder modelBuilder)
         {
 #pragma warning disable 612, 618
             modelBuilder.HasAnnotation("ProductVersion", "8.0.10");
@@ -276,12 +279,6 @@ namespace MyTracker.Infrastructure.Migrations
                     b.Property<int>("Age")
                         .HasColumnType("INTEGER");
 
-                    b.Property<double?>("CriticalSwimSpeedMinPer100m")
-                        .HasColumnType("REAL");
-
-                    b.Property<double?>("FtpWatts")
-                        .HasColumnType("REAL");
-
                     b.Property<double>("HeightCm")
                         .HasColumnType("REAL");
 
@@ -294,9 +291,6 @@ namespace MyTracker.Infrastructure.Migrations
                     b.Property<string>("Sex")
                         .IsRequired()
                         .HasColumnType("TEXT");
-
-                    b.Property<double?>("VmaMinPerKm")
-                        .HasColumnType("REAL");
 
                     b.Property<double>("WeightKg")
                         .HasColumnType("REAL");

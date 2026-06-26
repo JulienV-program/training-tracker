@@ -24,4 +24,5 @@ public class ActivityEntity
     public double? EndLat { get; set; }
     public double? EndLng { get; set; }
     public string? MapPolyline { get; set; }
+    public bool IsFullyImported { get; set; }
 }

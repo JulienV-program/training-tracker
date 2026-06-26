@@ -10,6 +10,7 @@ public class TrainingTrackerDbContext(DbContextOptions<TrainingTrackerDbContext>
     public DbSet<ActivityCommentaryEntity> ActivityCommentaries => Set<ActivityCommentaryEntity>();
     public DbSet<ActivityLapEntity> ActivityLaps => Set<ActivityLapEntity>();
     public DbSet<ActivitySplitEntity> ActivitySplits => Set<ActivitySplitEntity>();
+    public DbSet<UserProfileEntity> UserProfile => Set<UserProfileEntity>();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
@@ -34,5 +35,7 @@ public class TrainingTrackerDbContext(DbContextOptions<TrainingTrackerDbContext>
             builder.HasKey(s => s.Id);
             builder.HasIndex(s => new { s.ActivityId, s.SplitIndex }).IsUnique();
         });
+
+        modelBuilder.Entity<UserProfileEntity>().HasKey(p => p.Id);
     }
 }

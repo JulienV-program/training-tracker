@@ -9,7 +9,8 @@ public class ActivityService(
     ICsvExportService csvExportService,
     IActivityCommentaryRepository commentaryRepo,
     IOllamaService ollama,
-    OllamaSettings ollamaSettings)
+    OllamaSettings ollamaSettings,
+    IUserProfileRepository userProfileRepo)
 {
     public async Task<IEnumerable<ActivityDataPoint>> GetActivityDataPointsAsync(string activityId, bool forceReimport = false)
     {
@@ -68,11 +69,10 @@ public class ActivityService(
 
     public async Task<List<ActivityViewModel>> GetActivitiesDashboardAsync()
     {
-        var token = await provider.GetValidAccessTokenAsync();
-        var stravaActivities = await provider.GetActivitiesAsync(token);
+        var cachedActivities = await repo.GetCachedActivitiesAsync();
         var localIds = (await repo.GetStoredActivityIdsAsync()).ToHashSet();
 
-        return stravaActivities.Select(a => new ActivityViewModel
+        return cachedActivities.Select(a => new ActivityViewModel
         {
             Id = a.Id.ToString(),
             Name = a.Name,
@@ -81,6 +81,17 @@ public class ActivityService(
             IsDownloaded = localIds.Contains(a.Id.ToString())
         }).ToList();
     }
+
+    public async Task SyncActivitiesListAsync()
+    {
+        var token = await provider.GetValidAccessTokenAsync();
+        var activities = await provider.GetActivitiesAsync(token);
+        await repo.SaveActivitySummariesAsync(activities);
+    }
+
+    public Task<UserProfile?> GetUserProfileAsync() => userProfileRepo.GetProfileAsync();
+
+    public Task SaveUserProfileAsync(UserProfile profile) => userProfileRepo.SaveProfileAsync(profile);
 
     public async Task<string> GetOrGenerateCommentaryAsync(string activityId, bool forceRegenerate = false)
     {
@@ -93,8 +104,9 @@ public class ActivityService(
         var activity = await repo.GetActivityAsync(activityId)
             ?? throw new Exception("Activité introuvable en cache.");
         var dataPoints = await repo.GetDataPointsAsync(activityId);
+        var profile = await userProfileRepo.GetProfileAsync();
 
-        var commentary = await ollama.GenerateCommentaryAsync(activity, dataPoints);
+        var commentary = await ollama.GenerateCommentaryAsync(activity, dataPoints, profile);
         await commentaryRepo.SaveCommentaryAsync(activityId, commentary, modelUsed: ollamaSettings.Model);
         return commentary;
     }

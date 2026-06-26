@@ -1,0 +1,153 @@
+@page "/profile"
+@rendermode InteractiveServer
+@using MyTracker.Domain.Models
+@using MyTracker.Domain.Services
+@inject ActivityService ActivityService
+
+<PageTitle>Mon Profil</PageTitle>
+
+<div class="container mt-4" style="max-width: 600px;">
+    <h1>🧑 Mon Profil</h1>
+    <p class="text-muted">Ces informations sont utilisées comme contexte pour personnaliser les commentaires IA (calcul des zones de FC, etc.).</p>
+
+    <div class="card shadow-sm mt-4">
+        <div class="card-body">
+            <div class="mb-3">
+                <label class="form-label">Âge</label>
+                <input type="number" class="form-control" @bind="age" />
+            </div>
+
+            <div class="mb-3">
+                <label class="form-label">Sexe</label>
+                <select class="form-select" @bind="sex">
+                    <option value="Homme">Homme</option>
+                    <option value="Femme">Femme</option>
+                    <option value="Autre">Autre</option>
+                </select>
+            </div>
+
+            <div class="mb-3">
+                <label class="form-label">Taille (cm)</label>
+                <input type="number" class="form-control" @bind="heightCm" />
+            </div>
+
+            <div class="mb-3">
+                <label class="form-label">Poids (kg)</label>
+                <input type="number" step="0.1" class="form-control" @bind="weightKg" />
+            </div>
+
+            <div class="mb-3">
+                <label class="form-label">FC max (bpm)</label>
+                <input type="number" class="form-control" @bind="maxHeartRate" />
+            </div>
+
+            <div class="mb-3">
+                <label class="form-label">FC au repos (bpm)</label>
+                <input type="number" class="form-control" @bind="restingHeartRate" />
+            </div>
+
+            <hr />
+            <p class="text-muted small">Valeurs facultatives, laisser vide si inconnues.</p>
+
+            <div class="mb-3">
+                <label class="form-label">FTP vélo (watts)</label>
+                <input type="number" class="form-control" @bind="ftpWatts" />
+            </div>
+
+            <div class="mb-3">
+                <label class="form-label">VMA course à pied (min/km)</label>
+                <div class="d-flex align-items-center gap-2">
+                    <input type="number" min="0" class="form-control" style="max-width: 100px;" @bind="vmaMinutes" placeholder="min" />
+                    <span>min</span>
+                    <input type="number" min="0" max="59" class="form-control" style="max-width: 100px;" @bind="vmaSeconds" placeholder="sec" />
+                    <span>sec</span>
+                </div>
+            </div>
+
+            <div class="mb-3">
+                <label class="form-label">Vitesse de nage critique (min/100m)</label>
+                <div class="d-flex align-items-center gap-2">
+                    <input type="number" min="0" class="form-control" style="max-width: 100px;" @bind="cssMinutes" placeholder="min" />
+                    <span>min</span>
+                    <input type="number" min="0" max="59" class="form-control" style="max-width: 100px;" @bind="cssSeconds" placeholder="sec" />
+                    <span>sec</span>
+                </div>
+            </div>
+
+            <button class="btn btn-primary" @onclick="Save" disabled="@isSaving">
+                @(isSaving ? "Enregistrement..." : "💾 Enregistrer")
+            </button>
+
+            @if (savedMessage != null)
+            {
+                <div class="alert alert-success mt-3 mb-0">@savedMessage</div>
+            }
+        </div>
+    </div>
+</div>
+
+@code {
+    private int age;
+    private string sex = "Homme";
+    private double heightCm;
+    private double weightKg;
+    private int maxHeartRate;
+    private int restingHeartRate;
+    private double? ftpWatts;
+    private int? vmaMinutes;
+    private int? vmaSeconds;
+    private int? cssMinutes;
+    private int? cssSeconds;
+    private bool isSaving;
+    private string? savedMessage;
+
+    protected override async Task OnInitializedAsync()
+    {
+        var profile = await ActivityService.GetUserProfileAsync();
+        if (profile != null)
+        {
+            age = profile.Age;
+            sex = profile.Sex;
+            heightCm = profile.HeightCm;
+            weightKg = profile.WeightKg;
+            maxHeartRate = profile.MaxHeartRate;
+            restingHeartRate = profile.RestingHeartRate;
+            ftpWatts = profile.FtpWatts;
+            (vmaMinutes, vmaSeconds) = ToMinutesAndSeconds(profile.VmaMinPerKm);
+            (cssMinutes, cssSeconds) = ToMinutesAndSeconds(profile.CriticalSwimSpeedMinPer100m);
+        }
+    }
+
+    private async Task Save()
+    {
+        isSaving = true;
+        try
+        {
+            var vmaMinPerKm = ToDecimalMinutes(vmaMinutes, vmaSeconds);
+            var criticalSwimSpeedMinPer100m = ToDecimalMinutes(cssMinutes, cssSeconds);
+            var profile = new UserProfile(age, sex, heightCm, weightKg, maxHeartRate, restingHeartRate, ftpWatts, vmaMinPerKm, criticalSwimSpeedMinPer100m);
+            await ActivityService.SaveUserProfileAsync(profile);
+            savedMessage = "Profil enregistré.";
+        }
+        finally
+        {
+            isSaving = false;
+        }
+    }
+
+    // Convertit minutes + secondes saisies en minutes décimales pour le stockage/le prompt IA
+    private static double? ToDecimalMinutes(int? minutes, int? seconds)
+    {
+        if (!minutes.HasValue && !seconds.HasValue) return null;
+        var totalMinutes = minutes.GetValueOrDefault() + seconds.GetValueOrDefault() / 60.0;
+        return totalMinutes > 0 ? totalMinutes : null;
+    }
+
+    private static (int? Minutes, int? Seconds) ToMinutesAndSeconds(double? decimalMinutes)
+    {
+        if (!decimalMinutes.HasValue) return (null, null);
+        var minutes = (int)decimalMinutes.Value;
+        var seconds = (int)Math.Round((decimalMinutes.Value - minutes) * 60);
+        return (minutes, seconds);
+    }
+}

@@ -9,6 +9,10 @@ Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "MyTracker.Domain", "MyTrack
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "MyTracker.Infrastructure", "MyTracker.Infrastructure\MyTracker.Infrastructure.csproj", "{924A3AB5-A557-4806-AADA-0BFE19B3ED85}"
 EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "MyTracker.Domain.Tests", "MyTracker.Domain.Tests\MyTracker.Domain.Tests.csproj", "{C4FE974C-A18E-42A4-AB95-04C1B6D28DFE}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "MyTracker.Infrastructure.Tests", "MyTracker.Infrastructure.Tests\MyTracker.Infrastructure.Tests.csproj", "{14E3C30A-8B61-4613-85BF-53E50EAAB578}"
+EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
 		Debug|Any CPU = Debug|Any CPU
@@ -30,5 +34,13 @@ Global
 		{924A3AB5-A557-4806-AADA-0BFE19B3ED85}.Debug|Any CPU.Build.0 = Debug|Any CPU
 		{924A3AB5-A557-4806-AADA-0BFE19B3ED85}.Release|Any CPU.ActiveCfg = Release|Any CPU
 		{924A3AB5-A557-4806-AADA-0BFE19B3ED85}.Release|Any CPU.Build.0 = Release|Any CPU
+		{C4FE974C-A18E-42A4-AB95-04C1B6D28DFE}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{C4FE974C-A18E-42A4-AB95-04C1B6D28DFE}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{C4FE974C-A18E-42A4-AB95-04C1B6D28DFE}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{C4FE974C-A18E-42A4-AB95-04C1B6D28DFE}.Release|Any CPU.Build.0 = Release|Any CPU
+		{14E3C30A-8B61-4613-85BF-53E50EAAB578}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{14E3C30A-8B61-4613-85BF-53E50EAAB578}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{14E3C30A-8B61-4613-85BF-53E50EAAB578}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{14E3C30A-8B61-4613-85BF-53E50EAAB578}.Release|Any CPU.Build.0 = Release|Any CPU
 	EndGlobalSection
 EndGlobal

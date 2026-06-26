@@ -1,47 +1,66 @@
+using MyTracker.Domain.Configurations;
 using MyTracker.Domain.Interfaces;
 using MyTracker.Domain.Models;
 
 namespace MyTracker.Domain.Services;
-public class ActivityService(IActivityProvider provider, IActivityRepository repo)
+public class ActivityService(
+    IActivityProvider provider,
+    IActivityRepository repo,
+    ICsvExportService csvExportService,
+    IActivityCommentaryRepository commentaryRepo,
+    IOllamaService ollama,
+    OllamaSettings ollamaSettings)
 {
-    private readonly IActivityProvider _provider = provider;
-    private readonly IActivityRepository _repo = repo;
+    public async Task<IEnumerable<ActivityDataPoint>> GetActivityDataPointsAsync(string activityId, bool forceReimport = false)
+    {
+        // 1. Vérification du cache local
+        if (!forceReimport && await repo.ExistsAsync(activityId))
+        {
+            Console.WriteLine($"📦 Chargement depuis le cache local : activité {activityId}");
+            return await repo.GetDataPointsAsync(activityId);
+        }
+
+        // 2. Si pas en cache (ou ré-import forcé), appel API
+        Console.WriteLine($"🌐 Appel API Strava pour l'activité {activityId}...");
+        var token = await provider.GetValidAccessTokenAsync();
+        var activities = await provider.GetActivitiesAsync(token);
+        var activity = activities.FirstOrDefault(a => a.Id == activityId)
+            ?? throw new Exception("Activité introuvable sur Strava.");
+        var detail = await provider.GetActivityDetailAsync(activityId, token);
+        var streams = await provider.GetActivityStreamsAsync(activityId, token);
+
+        // 3. Sauvegarde pour la prochaine fois
+        await repo.SaveActivityAsync(activity);
+        await repo.SaveActivityDetailAsync(detail);
+        await repo.SaveDataPointsAsync(activityId, streams);
+
+        return streams;
+    }
+
+    public Task<Activity?> GetCachedActivityAsync(string activityId) => repo.GetActivityAsync(activityId);
+
+    public Task<IEnumerable<ActivityLap>> GetActivityLapsAsync(string activityId) => repo.GetLapsAsync(activityId);
+
+    public Task<IEnumerable<ActivitySplit>> GetActivitySplitsAsync(string activityId) => repo.GetSplitsAsync(activityId);
 
     public async Task<(string FileName, byte[] Content)> GetActivityCsvAsync(string activityId)
     {
-        string fileName = $"activity_{activityId}.csv";
-
-        // 1. Vérification du cache local
-        if (_repo.Exists(activityId))
-        {
-            Console.WriteLine($"📦 Chargement depuis le cache Mac : {fileName}");
-            return (fileName, _repo.Read(activityId));
-        }
-
-        // 2. Si pas en cache, appel API
-        Console.WriteLine($"🌐 Appel API Strava pour l'activité {activityId}...");
-        var token = await _provider.GetValidAccessTokenAsync();
-        var streams = await _provider.GetActivityStreamsAsync(activityId, token);
-        
-        var bytes = _repo.GetCsvBytes(streams);
-        
-        // 3. Sauvegarde pour la prochaine fois
-        _repo.Save(activityId, bytes);
-        
-        return (fileName, bytes);
+        var dataPoints = await GetActivityDataPointsAsync(activityId);
+        var bytes = csvExportService.GetCsvBytes(dataPoints);
+        return ($"activity_{activityId}.csv", bytes);
     }
 
     // Pour l'onglet "Mes Séances"
     public async Task<IEnumerable<Activity>> GetRecentActivitiesAsync()
     {
-        var token = await _provider.GetValidAccessTokenAsync();
-        return await _provider.GetActivitiesAsync(token);
+        var token = await provider.GetValidAccessTokenAsync();
+        return await provider.GetActivitiesAsync(token);
     }
 
     public async Task<(string FileName, byte[] Content)> GetLatestActivityCsvAsync()
     {
-        var token = await _provider.GetValidAccessTokenAsync();
-        var activities = await _provider.GetActivitiesAsync(token);
+        var token = await provider.GetValidAccessTokenAsync();
+        var activities = await provider.GetActivitiesAsync(token);
         var latest = activities.FirstOrDefault() ?? throw new Exception("Aucune activité.");
 
         return await GetActivityCsvAsync(latest.Id);
@@ -49,9 +68,9 @@ public class ActivityService(IActivityProvider provider, IActivityRepository rep
 
     public async Task<List<ActivityViewModel>> GetActivitiesDashboardAsync()
     {
-        var token = await _provider.GetValidAccessTokenAsync();
-        var stravaActivities = await _provider.GetActivitiesAsync(token);
-        var localIds = _repo.GetStoredActivityIds().ToHashSet();
+        var token = await provider.GetValidAccessTokenAsync();
+        var stravaActivities = await provider.GetActivitiesAsync(token);
+        var localIds = (await repo.GetStoredActivityIdsAsync()).ToHashSet();
 
         return stravaActivities.Select(a => new ActivityViewModel
         {
@@ -61,6 +80,23 @@ public class ActivityService(IActivityProvider provider, IActivityRepository rep
             Distance = a.Distance,
             IsDownloaded = localIds.Contains(a.Id.ToString())
         }).ToList();
+    }
+
+    public async Task<string> GetOrGenerateCommentaryAsync(string activityId, bool forceRegenerate = false)
+    {
+        if (!forceRegenerate)
+        {
+            var cached = await commentaryRepo.GetCommentaryAsync(activityId);
+            if (cached != null) return cached;
+        }
+
+        var activity = await repo.GetActivityAsync(activityId)
+            ?? throw new Exception("Activité introuvable en cache.");
+        var dataPoints = await repo.GetDataPointsAsync(activityId);
+
+        var commentary = await ollama.GenerateCommentaryAsync(activity, dataPoints);
+        await commentaryRepo.SaveCommentaryAsync(activityId, commentary, modelUsed: ollamaSettings.Model);
+        return commentary;
     }
 
 // Petit modèle de vue pour l'UI

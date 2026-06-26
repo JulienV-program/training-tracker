@@ -133,11 +133,11 @@ public class StravaProvider : IActivityProvider
 
     public async Task<IEnumerable<ActivityDataPoint>> GetActivityStreamsAsync(string activityId, string accessToken)
     {
-        var streamKeys = "time,distance,heartrate,watts,cadence,altitude,grade_smooth,velocity_smooth";
+        var streamKeys = "time,distance,heartrate,watts,cadence,altitude,grade_smooth,velocity_smooth,latlng,moving,temp";
         var url = $"activities/{activityId}/streams?keys={streamKeys}&key_by_type=true";
 
         _httpClient.DefaultRequestHeaders.Authorization = new ("Bearer", accessToken);
-        
+
         var response = await _httpClient.GetAsync(url);
         if (!response.IsSuccessStatusCode) return [];
 
@@ -151,7 +151,10 @@ public class StravaProvider : IActivityProvider
         for (int i = 0; i < timeList.Count; i++)
         {
             // Correction ici : on extrait l'entier du JsonElement
-            int timeOffset = timeList[i].GetInt32(); 
+            int timeOffset = timeList[i].GetInt32();
+
+            var latLng = GetLatLngValue(streams, "latlng", i);
+            var movingValue = GetStreamValue(streams, "moving", i);
 
             dataPoints.Add(new ActivityDataPoint(
                 TimeOffset: timeOffset,
@@ -161,11 +164,48 @@ public class StravaProvider : IActivityProvider
                 Cadence: GetStreamValue(streams, "cadence", i),
                 Altitude: GetStreamValue(streams, "altitude", i),
                 Grade: GetStreamValue(streams, "grade_smooth", i),
-                Velocity: GetStreamValue(streams, "velocity_smooth", i)
+                Velocity: GetStreamValue(streams, "velocity_smooth", i),
+                Lat: latLng?.Lat,
+                Lng: latLng?.Lng,
+                Moving: movingValue.HasValue ? movingValue == 1.0 : null,
+                Temperature: GetStreamValue(streams, "temp", i)
             ));
         }
 
         return dataPoints;
+    }
+
+    public async Task<ActivityDetail> GetActivityDetailAsync(string activityId, string accessToken)
+    {
+        _httpClient.DefaultRequestHeaders.Authorization = new("Bearer", accessToken);
+
+        var dto = await _httpClient.GetFromJsonAsync<StravaDetailedActivityDto>($"activities/{activityId}")
+            ?? throw new Exception("Réponse vide de Strava pour le détail de l'activité.");
+
+        var laps = (dto.laps ?? []).Select(l => new ActivityLap(
+            l.id, activityId, l.lap_index, l.name, l.elapsed_time, l.moving_time, l.start_date,
+            l.distance, l.average_speed, l.max_speed, l.average_heartrate, l.max_heartrate, l.total_elevation_gain
+        )).ToList();
+
+        var splits = (dto.splits_metric ?? []).Select(s => new ActivitySplit(
+            activityId, s.split, s.distance, s.elapsed_time, s.elevation_difference,
+            s.moving_time, s.average_speed, s.average_heartrate, s.pace_zone
+        )).ToList();
+
+        var polyline = dto.map?.summary_polyline;
+
+        return new ActivityDetail(
+            activityId,
+            dto.average_speed,
+            dto.max_speed,
+            dto.start_latlng?.Count == 2 ? dto.start_latlng[0] : null,
+            dto.start_latlng?.Count == 2 ? dto.start_latlng[1] : null,
+            dto.end_latlng?.Count == 2 ? dto.end_latlng[0] : null,
+            dto.end_latlng?.Count == 2 ? dto.end_latlng[1] : null,
+            polyline,
+            laps,
+            splits
+        );
     }
 
     private static double? GetStreamValue(Dictionary<string, StravaStreamDto> streams, string key, int index)
@@ -178,12 +218,26 @@ public class StravaProvider : IActivityProvider
                     {
                         return element.GetDouble();
                     }
-                    
+
                     // Cas particulier : si Strava envoie un booléen (ex: "moving")
                     if (element.ValueKind == JsonValueKind.True) return 1.0;
                     if (element.ValueKind == JsonValueKind.False) return 0.0;
                 }
             }
+        return null;
+    }
+
+    // Le stream "latlng" renvoie des paires [lat, lng] par point, contrairement aux autres streams scalaires
+    private static (double Lat, double Lng)? GetLatLngValue(Dictionary<string, StravaStreamDto> streams, string key, int index)
+    {
+        if (streams.TryGetValue(key, out var stream) && index < stream.Data.Count)
+        {
+            var element = stream.Data[index];
+            if (element.ValueKind == JsonValueKind.Array && element.GetArrayLength() == 2)
+            {
+                return (element[0].GetDouble(), element[1].GetDouble());
+            }
+        }
         return null;
     }
 

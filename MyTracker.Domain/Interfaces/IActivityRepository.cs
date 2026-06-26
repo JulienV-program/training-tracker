@@ -4,11 +4,13 @@ namespace MyTracker.Domain.Interfaces;
 
 public interface IActivityRepository
 {
-    void ExportToCsv(IEnumerable<Activity> activities, string filePath);
-    void ExportDetailedToCsv(IEnumerable<ActivityDataPoint> points, string filePath);
-    byte[] GetCsvBytes<T>(IEnumerable<T> records);
-    bool Exists(string activityId);
-    byte[] Read(string activityId);
-    void Save(string activityId, byte[] data);
-    IEnumerable<string> GetStoredActivityIds();
+    Task<bool> ExistsAsync(string activityId);
+    Task SaveActivityAsync(Activity activity);
+    Task SaveDataPointsAsync(string activityId, IEnumerable<ActivityDataPoint> points);
+    Task<Activity?> GetActivityAsync(string activityId);
+    Task<IEnumerable<ActivityDataPoint>> GetDataPointsAsync(string activityId);
+    Task<IEnumerable<string>> GetStoredActivityIdsAsync();
+    Task SaveActivityDetailAsync(ActivityDetail detail);
+    Task<IEnumerable<ActivityLap>> GetLapsAsync(string activityId);
+    Task<IEnumerable<ActivitySplit>> GetSplitsAsync(string activityId);
 }

@@ -2,6 +2,9 @@ appsettings.json
 tokens.json
 *.csv
 *.tcx
+*.db
+*.db-shm
+*.db-wal
 bin/
 obj/
 .vs/

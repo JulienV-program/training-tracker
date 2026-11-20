@@ -1,163 +1,132 @@
+using System.Net;
+using System.Net.Http.Headers;
 using System.Net.Http.Json;
+using System.Text.Json;
+using Microsoft.Extensions.Logging;
+using MyTracker.Domain.Configurations;
+using MyTracker.Domain.Exceptions;
 using MyTracker.Domain.Interfaces;
 using MyTracker.Domain.Models;
-using MyTracker.Domain.Configurations;
 using MyTracker.Infrastructure.Dto;
-using System.Text.Json;
+using MyTracker.Infrastructure.Persistence;
 
 namespace MyTracker.Infrastructure.External;
 
+/// <summary>
+/// Client de l'API Strava v3. Chaque appel construit son propre <see cref="HttpRequestMessage"/> :
+/// aucun état (en-tête d'autorisation) n'est partagé sur le HttpClient, qui peut donc être mutualisé.
+/// </summary>
 public class StravaProvider : IActivityProvider
 {
+    private const string ServiceName = "Strava";
+    private const string TokenEndpoint = "https://www.strava.com/oauth/token";
+    private const string StreamKeys = "time,distance,heartrate,watts,cadence,altitude,grade_smooth,velocity_smooth,latlng,moving,temp";
+
+    // Empêche deux rafraîchissements simultanés du token (ex. deux composants Blazor qui chargent en même temps).
+    private static readonly SemaphoreSlim TokenRefreshLock = new(1, 1);
+
     private readonly HttpClient _httpClient;
     private readonly StravaSettings _settings;
+    private readonly ILogger<StravaProvider> _logger;
+    private readonly string _tokenFilePath;
 
-    public StravaProvider(HttpClient httpClient, StravaSettings settings)
+    public StravaProvider(HttpClient httpClient, StravaSettings settings, ILogger<StravaProvider> logger)
     {
         _httpClient = httpClient;
         _settings = settings;
-        _httpClient.BaseAddress = new Uri("https://www.strava.com/api/v3/");
+        _logger = logger;
+        _tokenFilePath = string.IsNullOrWhiteSpace(settings.TokenFilePath)
+            ? TrainingTrackerDbPath.DefaultTokenFilePath
+            : settings.TokenFilePath;
+        _httpClient.BaseAddress ??= new Uri("https://www.strava.com/api/v3/");
     }
 
     public async Task<IEnumerable<Activity>> GetActivitiesAsync(string accessToken)
     {
-        _httpClient.DefaultRequestHeaders.Authorization = 
-            new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", accessToken);
+        var activities = new List<Activity>();
+        var pageSize = Math.Clamp(_settings.ActivitiesPageSize, 1, 200);
 
-        var response = await _httpClient.GetFromJsonAsync<List<StravaActivityDto>>("athlete/activities");
-
-        return response?.Select(dto => new Activity(
-                dto.id.ToString(),
-                dto.name,
-                dto.start_date,
-                dto.type,
-                dto.distance,
-                dto.moving_time,
-                dto.total_elevation_gain,
-                dto.average_heartrate,
-                dto.max_heartrate,
-                dto.average_watts,
-                dto.max_watts,
-                dto.average_cadence,
-                dto.calories,
-                dto.suffer_score
-            )) ?? [];
-    }
-
-    public async Task<string> RefreshAccessTokenAsync()
-    {
-        var payload = new
+        for (var page = 1; page <= _settings.MaxActivityPages; page++)
         {
-            client_id = _settings.ClientId,
-            client_secret = _settings.ClientSecret,
-            grant_type = "refresh_token",
-            refresh_token = _settings.RefreshToken
-        };
+            using var response = await SendAsync(HttpMethod.Get, $"athlete/activities?page={page}&per_page={pageSize}", accessToken);
+            await EnsureSuccessAsync(response, "liste des activités");
 
-        var response = await _httpClient.PostAsJsonAsync("https://www.strava.com/oauth/token", payload);
-        response.EnsureSuccessStatusCode(); // Vérifie si l'appel a réussi
+            var dtos = await response.Content.ReadFromJsonAsync<List<StravaActivityDto>>() ?? [];
+            activities.AddRange(dtos.Select(MapActivity));
 
-        var data = await response.Content.ReadFromJsonAsync<StravaTokenResponse>();
-        return data?.Access_token ?? throw new Exception("Impossible de récupérer le token.");
+            if (dtos.Count < pageSize) break; // dernière page atteinte
+        }
+
+        _logger.LogDebug("{Count} activités récupérées depuis Strava", activities.Count);
+        return activities;
     }
-
-    public async Task<StravaTokenResponse> ExchangeCodeForTokenAsync(string code)
-{
-    var values = new Dictionary<string, string>
-    {
-        { "client_id", _settings.ClientId },
-        { "client_secret", _settings.ClientSecret },
-        { "code", code },
-        { "grant_type", "authorization_code" }
-    };
-
-    var content = new FormUrlEncodedContent(values);
-    
-    var response = await _httpClient.PostAsync("https://www.strava.com/oauth/token", content);
-    
-    if (!response.IsSuccessStatusCode)
-    {
-        var errorBody = await response.Content.ReadAsStringAsync();
-        throw new Exception($"Erreur Strava ({response.StatusCode}) : {errorBody}");
-    }
-
-    return await response.Content.ReadFromJsonAsync<StravaTokenResponse>() 
-           ?? throw new Exception("Réponse vide de Strava");
-}
 
     public async Task<string> GetValidAccessTokenAsync()
     {
-        var tokenPath = "tokens.json";
-        StravaToken? currentToken = null;
+        var cached = await ReadCachedTokenAsync();
+        if (IsStillValid(cached)) return cached!.AccessToken;
 
-        if (File.Exists(tokenPath))
+        await TokenRefreshLock.WaitAsync();
+        try
         {
-            var json = await File.ReadAllTextAsync(tokenPath);
-            currentToken = JsonSerializer.Deserialize<StravaToken>(json);
+            // Un autre appel a pu rafraîchir le token pendant l'attente du verrou.
+            cached = await ReadCachedTokenAsync();
+            if (IsStillValid(cached)) return cached!.AccessToken;
+
+            _logger.LogInformation("Token Strava expiré ou absent, rafraîchissement");
+            var payload = new Dictionary<string, string>
+            {
+                ["client_id"] = _settings.ClientId,
+                ["client_secret"] = _settings.ClientSecret,
+                ["grant_type"] = "refresh_token",
+                ["refresh_token"] = cached?.RefreshToken ?? _settings.RefreshToken
+            };
+
+            using var response = await SendAsync(HttpMethod.Post, TokenEndpoint, accessToken: null, new FormUrlEncodedContent(payload));
+            await EnsureSuccessAsync(response, "rafraîchissement du token");
+
+            var result = await response.Content.ReadFromJsonAsync<StravaTokenResponse>()
+                ?? throw new ExternalServiceException(ServiceName, "réponse vide au rafraîchissement du token");
+
+            var newToken = new StravaToken
+            {
+                AccessToken = result.Access_token,
+                RefreshToken = result.Refresh_token,
+                ExpiresAt = result.Expires_at
+            };
+            await File.WriteAllTextAsync(_tokenFilePath, JsonSerializer.Serialize(newToken));
+            if (!OperatingSystem.IsWindows())
+                File.SetUnixFileMode(_tokenFilePath, UnixFileMode.UserRead | UnixFileMode.UserWrite); // chmod 600
+            return newToken.AccessToken;
         }
-
-        var now = DateTimeOffset.UtcNow.ToUnixTimeSeconds();
-        if (currentToken != null && currentToken.ExpiresAt > (now + 60))
+        finally
         {
-            return currentToken.AccessToken;
+            TokenRefreshLock.Release();
         }
-
-        Console.WriteLine("🔄 Token expiré ou absent, rafraîchissement...");
-        var refreshToken = currentToken?.RefreshToken ?? _settings.RefreshToken;
-
-        var payload = new Dictionary<string, string>
-        {
-            { "client_id", _settings.ClientId },
-            { "client_secret", _settings.ClientSecret },
-            { "grant_type", "refresh_token" },
-            { "refresh_token", refreshToken }
-        };
-
-        var response = await _httpClient.PostAsync("https://www.strava.com/oauth/token", new FormUrlEncodedContent(payload));
-        
-        if (!response.IsSuccessStatusCode) throw new Exception("Erreur de rafraîchissement Strava.");
-
-        var result = await response.Content.ReadFromJsonAsync<StravaTokenResponse>();
-
-        var newToken = new StravaToken
-        {
-            AccessToken = result!.Access_token,
-            RefreshToken = result!.Refresh_token,
-            ExpiresAt = result!.Expires_at
-        };
-
-        await File.WriteAllTextAsync(tokenPath, JsonSerializer.Serialize(newToken));
-        
-        return newToken.AccessToken;
     }
 
     public async Task<IEnumerable<ActivityDataPoint>> GetActivityStreamsAsync(string activityId, string accessToken)
     {
-        var streamKeys = "time,distance,heartrate,watts,cadence,altitude,grade_smooth,velocity_smooth,latlng,moving,temp";
-        var url = $"activities/{activityId}/streams?keys={streamKeys}&key_by_type=true";
+        using var response = await SendAsync(HttpMethod.Get, $"activities/{activityId}/streams?keys={StreamKeys}&key_by_type=true", accessToken);
 
-        _httpClient.DefaultRequestHeaders.Authorization = new ("Bearer", accessToken);
-
-        var response = await _httpClient.GetAsync(url);
-        if (!response.IsSuccessStatusCode) return [];
+        // Une activité saisie manuellement n'a pas de streams : ce n'est pas une erreur bloquante.
+        if (!response.IsSuccessStatusCode)
+        {
+            _logger.LogWarning("Streams indisponibles pour {ActivityId} (HTTP {Status})", activityId, (int)response.StatusCode);
+            return [];
+        }
 
         var streams = await response.Content.ReadFromJsonAsync<Dictionary<string, StravaStreamDto>>();
+        if (streams == null || !streams.TryGetValue("time", out var time)) return [];
 
-        if (streams == null || !streams.TryGetValue("time", out StravaStreamDto? value)) return [];
-
-        var timeList = value.Data;
-        var dataPoints = new List<ActivityDataPoint>();
-
-        for (int i = 0; i < timeList.Count; i++)
+        var dataPoints = new List<ActivityDataPoint>(time.Data.Count);
+        for (var i = 0; i < time.Data.Count; i++)
         {
-            // Correction ici : on extrait l'entier du JsonElement
-            int timeOffset = timeList[i].GetInt32();
-
             var latLng = GetLatLngValue(streams, "latlng", i);
-            var movingValue = GetStreamValue(streams, "moving", i);
+            var moving = GetStreamValue(streams, "moving", i);
 
             dataPoints.Add(new ActivityDataPoint(
-                TimeOffset: timeOffset,
+                TimeOffset: time.Data[i].GetInt32(),
                 Distance: GetStreamValue(streams, "distance", i),
                 HeartRate: GetStreamValue(streams, "heartrate", i),
                 Watts: GetStreamValue(streams, "watts", i),
@@ -167,7 +136,7 @@ public class StravaProvider : IActivityProvider
                 Velocity: GetStreamValue(streams, "velocity_smooth", i),
                 Lat: latLng?.Lat,
                 Lng: latLng?.Lng,
-                Moving: movingValue.HasValue ? movingValue == 1.0 : null,
+                Moving: moving.HasValue ? moving == 1.0 : null,
                 Temperature: GetStreamValue(streams, "temp", i)
             ));
         }
@@ -177,10 +146,12 @@ public class StravaProvider : IActivityProvider
 
     public async Task<ActivityDetail> GetActivityDetailAsync(string activityId, string accessToken)
     {
-        _httpClient.DefaultRequestHeaders.Authorization = new("Bearer", accessToken);
+        using var response = await SendAsync(HttpMethod.Get, $"activities/{activityId}", accessToken);
+        if (response.StatusCode == HttpStatusCode.NotFound) throw new ActivityNotFoundException(activityId, ServiceName);
+        await EnsureSuccessAsync(response, $"détail de l'activité {activityId}");
 
-        var dto = await _httpClient.GetFromJsonAsync<StravaDetailedActivityDto>($"activities/{activityId}")
-            ?? throw new Exception("Réponse vide de Strava pour le détail de l'activité.");
+        var dto = await response.Content.ReadFromJsonAsync<StravaDetailedActivityDto>()
+            ?? throw new ExternalServiceException(ServiceName, $"réponse vide pour le détail de l'activité {activityId}");
 
         var laps = (dto.laps ?? []).Select(l => new ActivityLap(
             l.id, activityId, l.lap_index, l.name, l.elapsed_time, l.moving_time, l.start_date,
@@ -192,8 +163,6 @@ public class StravaProvider : IActivityProvider
             s.moving_time, s.average_speed, s.average_heartrate, s.pace_zone
         )).ToList();
 
-        var polyline = dto.map?.summary_polyline;
-
         return new ActivityDetail(
             activityId,
             dto.average_speed,
@@ -202,47 +171,102 @@ public class StravaProvider : IActivityProvider
             dto.start_latlng?.Count == 2 ? dto.start_latlng[1] : null,
             dto.end_latlng?.Count == 2 ? dto.end_latlng[0] : null,
             dto.end_latlng?.Count == 2 ? dto.end_latlng[1] : null,
-            polyline,
+            dto.map?.summary_polyline,
             laps,
             splits
         );
     }
 
+    private async Task<HttpResponseMessage> SendAsync(HttpMethod method, string url, string? accessToken, HttpContent? content = null)
+    {
+        using var request = new HttpRequestMessage(method, url) { Content = content };
+        if (accessToken is not null)
+            request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", accessToken);
+
+        try
+        {
+            return await _httpClient.SendAsync(request);
+        }
+        catch (HttpRequestException ex)
+        {
+            throw new ExternalServiceException(ServiceName, "service injoignable (vérifier la connexion réseau)", innerException: ex);
+        }
+    }
+
+    private async Task EnsureSuccessAsync(HttpResponseMessage response, string operation)
+    {
+        if (response.IsSuccessStatusCode) return;
+
+        var body = await response.Content.ReadAsStringAsync();
+        _logger.LogWarning("Échec Strava ({Operation}) : HTTP {Status} {Body}", operation, (int)response.StatusCode, body);
+
+        var reason = response.StatusCode switch
+        {
+            HttpStatusCode.Unauthorized => "accès refusé (token ou identifiants invalides)",
+            HttpStatusCode.TooManyRequests => "quota d'appels API dépassé, réessayer dans quelques minutes",
+            _ => $"erreur HTTP {(int)response.StatusCode}"
+        };
+        throw new ExternalServiceException(ServiceName, $"{operation} : {reason}", response.StatusCode);
+    }
+
+    private async Task<StravaToken?> ReadCachedTokenAsync()
+    {
+        if (!File.Exists(_tokenFilePath)) return null;
+        try
+        {
+            return JsonSerializer.Deserialize<StravaToken>(await File.ReadAllTextAsync(_tokenFilePath));
+        }
+        catch (JsonException ex)
+        {
+            _logger.LogWarning(ex, "Fichier token illisible ({Path}), il sera régénéré", _tokenFilePath);
+            return null;
+        }
+    }
+
+    private static bool IsStillValid(StravaToken? token)
+        => token is not null && token.ExpiresAt > DateTimeOffset.UtcNow.ToUnixTimeSeconds() + 60;
+
+    private static Activity MapActivity(StravaActivityDto dto) => new(
+        dto.id.ToString(),
+        dto.name,
+        dto.start_date,
+        dto.type,
+        dto.distance,
+        dto.moving_time,
+        dto.total_elevation_gain,
+        dto.average_heartrate,
+        dto.max_heartrate,
+        dto.average_watts,
+        dto.max_watts,
+        dto.average_cadence,
+        dto.calories,
+        dto.suffer_score);
+
     private static double? GetStreamValue(Dictionary<string, StravaStreamDto> streams, string key, int index)
     {
-        if (streams.TryGetValue(key, out var stream) && index < stream.Data.Count)
-            {
-                if (stream.Data[index] is JsonElement element)
-                {
-                    if (element.ValueKind == JsonValueKind.Number)
-                    {
-                        return element.GetDouble();
-                    }
+        if (!streams.TryGetValue(key, out var stream) || index >= stream.Data.Count) return null;
 
-                    // Cas particulier : si Strava envoie un booléen (ex: "moving")
-                    if (element.ValueKind == JsonValueKind.True) return 1.0;
-                    if (element.ValueKind == JsonValueKind.False) return 0.0;
-                }
-            }
-        return null;
+        return stream.Data[index].ValueKind switch
+        {
+            JsonValueKind.Number => stream.Data[index].GetDouble(),
+            JsonValueKind.True => 1.0,   // ex. stream "moving"
+            JsonValueKind.False => 0.0,
+            _ => null
+        };
     }
 
-    // Le stream "latlng" renvoie des paires [lat, lng] par point, contrairement aux autres streams scalaires
+    // Le stream "latlng" renvoie des paires [lat, lng] par point, contrairement aux autres streams scalaires.
     private static (double Lat, double Lng)? GetLatLngValue(Dictionary<string, StravaStreamDto> streams, string key, int index)
     {
-        if (streams.TryGetValue(key, out var stream) && index < stream.Data.Count)
-        {
-            var element = stream.Data[index];
-            if (element.ValueKind == JsonValueKind.Array && element.GetArrayLength() == 2)
-            {
-                return (element[0].GetDouble(), element[1].GetDouble());
-            }
-        }
-        return null;
+        if (!streams.TryGetValue(key, out var stream) || index >= stream.Data.Count) return null;
+
+        var element = stream.Data[index];
+        return element.ValueKind == JsonValueKind.Array && element.GetArrayLength() == 2
+            ? (element[0].GetDouble(), element[1].GetDouble())
+            : null;
     }
 
-// DTO pour désérialiser les listes de Strava
     public record StravaStreamDto(List<JsonElement> Data);
-// DTO pour la réponse du token
+
     public record StravaTokenResponse(string Access_token, string Refresh_token, long Expires_at);
 }

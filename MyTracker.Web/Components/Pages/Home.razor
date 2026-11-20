@@ -3,7 +3,11 @@
 @using MyTracker.Domain.Configurations
 @using MyTracker.Domain.Services
 @inject StravaSettings Settings
-@inject ActivityService ActivityService
+@using MyTracker.Domain.Models
+@using MyTracker.Infrastructure.Persistence
+@inject ActivityImportService ImportService
+@inject ActivityQueryService QueryService
+@inject ILogger<Home> Logger
 @inject NavigationManager Nav
 
 <PageTitle>MyTracker - Tableau de bord</PageTitle>
@@ -127,12 +131,12 @@
     private bool isSyncing;
     private bool isImportingLatest;
     private string? errorMessage;
-    private ActivityService.HomeDashboardViewModel? dashboard;
+    private HomeDashboard? dashboard;
 
     protected override async Task OnInitializedAsync()
     {
-        isConnected = File.Exists("tokens.json") || !string.IsNullOrEmpty(Settings.RefreshToken);
-        dashboard = await ActivityService.GetHomeDashboardAsync();
+        isConnected = File.Exists(Settings.TokenFilePath ?? TrainingTrackerDbPath.DefaultTokenFilePath) || !string.IsNullOrEmpty(Settings.RefreshToken);
+        dashboard = await QueryService.GetHomeDashboardAsync();
     }
 
     private async Task SyncFromStrava()
@@ -141,12 +145,12 @@
         errorMessage = null;
         try
         {
-            await ActivityService.SyncActivitiesListAsync();
-            dashboard = await ActivityService.GetHomeDashboardAsync();
+            await ImportService.SyncActivitiesListAsync();
+            dashboard = await QueryService.GetHomeDashboardAsync();
         }
         catch (Exception ex)
         {
-            errorMessage = $"Impossible de synchroniser avec Strava : {ex.Message}";
+            errorMessage = UserFacingError.Describe(ex, Logger, "Impossible de synchroniser avec Strava");
         }
         finally
         {
@@ -162,12 +166,12 @@
         errorMessage = null;
         try
         {
-            await ActivityService.GetActivityDataPointsAsync(dashboard.LatestActivity.Id);
-            dashboard = await ActivityService.GetHomeDashboardAsync();
+            await ImportService.GetOrImportDataPointsAsync(dashboard.LatestActivity.Id);
+            dashboard = await QueryService.GetHomeDashboardAsync();
         }
         catch (Exception ex)
         {
-            errorMessage = $"Impossible d'importer cette activité : {ex.Message}";
+            errorMessage = UserFacingError.Describe(ex, Logger, "Impossible d'importer cette activité");
         }
         finally
         {

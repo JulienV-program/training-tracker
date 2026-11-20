@@ -1,53 +1,61 @@
+using System.ComponentModel.DataAnnotations;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
+using Microsoft.Extensions.Logging;
 using MyTracker.Domain.Configurations;
+using MyTracker.Domain.Exceptions;
 using MyTracker.Domain.Services;
 using MyTracker.Infrastructure.Csv;
 using MyTracker.Infrastructure.External;
 using MyTracker.Infrastructure.Persistence;
 
-// 1. Chargement de la configuration
+// Utilitaire console : exporte la dernière activité Strava en CSV.
+// Câblage manuel (sans conteneur DI) : le domaine ne dépend que d'interfaces, il se compose à la main.
+
+// 1. Configuration (appsettings.json optionnel + variables d'environnement Strava__ClientId, ...)
 var config = new ConfigurationBuilder()
     .SetBasePath(Directory.GetCurrentDirectory())
-    .AddJsonFile("appsettings.json")
+    .AddJsonFile("appsettings.json", optional: true)
     .AddEnvironmentVariables()
     .Build();
 
-var settings = config.GetSection("Strava").Get<StravaSettings>();
-var ollamaSettings = config.GetSection("Ollama").Get<OllamaSettings>() ?? new OllamaSettings();
+using var loggerFactory = LoggerFactory.Create(b => b
+    .AddSimpleConsole(o => { o.SingleLine = true; o.TimestampFormat = "HH:mm:ss "; })
+    .SetMinimumLevel(LogLevel.Information));
+var logger = loggerFactory.CreateLogger("MyTracker.App");
 
-// 2. Initialisation des outils (L'infrastructure)
+var stravaSettings = config.GetSection(StravaSettings.SectionName).Get<StravaSettings>() ?? new StravaSettings();
+var validationErrors = new List<ValidationResult>();
+if (!Validator.TryValidateObject(stravaSettings, new ValidationContext(stravaSettings), validationErrors, validateAllProperties: true))
+{
+    foreach (var error in validationErrors)
+        logger.LogError("Configuration Strava invalide : {Error}", error.ErrorMessage);
+    return 1;
+}
+
+// 2. Infrastructure
 using var httpClient = new HttpClient();
-var stravaProvider = new StravaProvider(httpClient, settings!);
-using var ollamaHttpClient = new HttpClient();
-var ollamaClient = new OllamaClient(ollamaHttpClient, ollamaSettings);
+var stravaProvider = new StravaProvider(httpClient, stravaSettings, loggerFactory.CreateLogger<StravaProvider>());
 
 var connectionString = TrainingTrackerDbPath.ResolveConnectionString(config.GetConnectionString("TrainingTrackerDb"));
 var dbOptions = new DbContextOptionsBuilder<TrainingTrackerDbContext>().UseSqlite(connectionString).Options;
-using var db = new TrainingTrackerDbContext(dbOptions);
-db.Database.Migrate();
+await using var db = new TrainingTrackerDbContext(dbOptions);
+await db.Database.MigrateAsync();
 
-var activityRepo = new SqliteActivityRepository(db);
-var commentaryRepo = new SqliteActivityCommentaryRepository(db);
-var csvExportService = new CsvExportService();
-var userProfileRepo = new SqliteUserProfileRepository(db);
-
-// 3. Le Chef d'Orchestre (On lui donne ses outils)
-var activityService = new ActivityService(stravaProvider, activityRepo, csvExportService, commentaryRepo, ollamaClient, ollamaSettings, userProfileRepo);
+// 3. Services du domaine (les mêmes que ceux de l'application web)
+var importer = new ActivityImportService(stravaProvider, new SqliteActivityRepository(db), loggerFactory.CreateLogger<ActivityImportService>());
+var exporter = new ActivityExportService(importer, new CsvExportService());
 
 try
 {
-    Console.WriteLine("🚀 Lancement de l'extraction (Mode Console)...");
-
-    // ON UTILISE LE SERVICE UNIQUE ICI
-    var (fileName, content) = await activityService.GetLatestActivityCsvAsync();
-
-    // Comme on est dans une console, on écrit physiquement le fichier
+    logger.LogInformation("Export de la dernière activité Strava...");
+    var (fileName, content) = await exporter.GetLatestActivityCsvAsync();
     await File.WriteAllBytesAsync(fileName, content);
-
-    Console.WriteLine($"✨ Succès ! Fichier '{fileName}' généré avec succès.");
+    logger.LogInformation("Fichier {FileName} généré ({Size} octets)", fileName, content.Length);
+    return 0;
 }
-catch (Exception ex)
+catch (TrainingTrackerException ex)
 {
-    Console.WriteLine($"❌ Erreur critique : {ex.Message}");
+    logger.LogError("{Message}", ex.Message);
+    return 2;
 }

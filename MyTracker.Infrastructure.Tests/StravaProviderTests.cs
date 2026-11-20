@@ -1,18 +1,125 @@
 using System.Net;
+using System.Text.Json;
+using Microsoft.Extensions.Logging.Abstractions;
 using MyTracker.Domain.Configurations;
+using MyTracker.Domain.Exceptions;
+using MyTracker.Domain.Models;
 using MyTracker.Infrastructure.External;
 using MyTracker.Infrastructure.Tests.TestUtilities;
 using Xunit;
 
 namespace MyTracker.Infrastructure.Tests;
 
-public class StravaProviderTests
+public class StravaProviderTests : IDisposable
 {
-    private static StravaProvider CreateProvider(HttpStatusCode statusCode, string responseContent, out FakeHttpMessageHandler handler)
+    // Chaque test utilise son propre fichier de token, jamais celui de l'utilisateur.
+    private readonly string _tokenFile = Path.Combine(Path.GetTempPath(), $"tt-token-{Guid.NewGuid():N}.json");
+
+    public void Dispose() => File.Delete(_tokenFile);
+
+    private StravaSettings Settings(int pageSize = 100, int maxPages = 10) => new()
+    {
+        ClientId = "id", ClientSecret = "secret", RefreshToken = "initial-refresh",
+        TokenFilePath = _tokenFile, ActivitiesPageSize = pageSize, MaxActivityPages = maxPages
+    };
+
+    private StravaProvider CreateProvider(HttpStatusCode statusCode, string responseContent, out FakeHttpMessageHandler handler)
     {
         handler = new FakeHttpMessageHandler(statusCode, responseContent);
-        var httpClient = new HttpClient(handler);
-        return new StravaProvider(httpClient, new StravaSettings());
+        return CreateProvider(handler);
+    }
+
+    private StravaProvider CreateProvider(FakeHttpMessageHandler handler, StravaSettings? settings = null)
+        => new(new HttpClient(handler), settings ?? Settings(), NullLogger<StravaProvider>.Instance);
+
+    private static string ActivitiesJson(params long[] ids) => "[" + string.Join(",", ids.Select(id => $$"""
+        { "id": {{id}}, "name": "A{{id}}", "start_date": "2026-01-01T07:00:00Z", "type": "Run",
+          "distance": 1000.0, "moving_time": 300, "total_elevation_gain": 0.0 }
+        """)) + "]";
+
+    [Fact]
+    public async Task GetActivitiesAsync_FollowsPagination_UntilAPartialPageIsReturned()
+    {
+        var handler = new FakeHttpMessageHandler(req => new HttpResponseMessage(HttpStatusCode.OK)
+        {
+            Content = new StringContent(req.RequestUri!.Query.Contains("page=1&") ? ActivitiesJson(1, 2)
+                : req.RequestUri.Query.Contains("page=2&") ? ActivitiesJson(3, 4)
+                : ActivitiesJson(5))
+        });
+        var provider = CreateProvider(handler, Settings(pageSize: 2));
+
+        var activities = (await provider.GetActivitiesAsync("token")).ToList();
+
+        Assert.Equal(["1", "2", "3", "4", "5"], activities.Select(a => a.Id));
+        Assert.Equal(3, handler.Requests.Count);
+        Assert.All(handler.Requests, r => Assert.Contains("per_page=2", r.RequestUri.Query));
+    }
+
+    [Fact]
+    public async Task GetActivitiesAsync_StopsAtMaxPages()
+    {
+        var handler = new FakeHttpMessageHandler(HttpStatusCode.OK, ActivitiesJson(1, 2));
+        var provider = CreateProvider(handler, Settings(pageSize: 2, maxPages: 3));
+
+        await provider.GetActivitiesAsync("token");
+
+        Assert.Equal(3, handler.Requests.Count);
+    }
+
+    [Fact]
+    public async Task Requests_CarryTheirOwnBearerToken_WithoutLeakingBetweenCalls()
+    {
+        var handler = new FakeHttpMessageHandler(HttpStatusCode.OK, "[]");
+        var provider = CreateProvider(handler);
+
+        await provider.GetActivitiesAsync("token-A");
+        await provider.GetActivitiesAsync("token-B");
+
+        Assert.Equal("Bearer token-A", handler.Requests[0].Authorization);
+        Assert.Equal("Bearer token-B", handler.Requests[1].Authorization);
+    }
+
+    [Fact]
+    public async Task GetActivitiesAsync_ThrowsExternalServiceException_OnUnauthorized()
+    {
+        var provider = CreateProvider(HttpStatusCode.Unauthorized, """{ "message": "Authorization Error" }""", out _);
+
+        var ex = await Assert.ThrowsAsync<ExternalServiceException>(() => provider.GetActivitiesAsync("bad"));
+
+        Assert.Equal(HttpStatusCode.Unauthorized, ex.StatusCode);
+        Assert.Equal("Strava", ex.ServiceName);
+    }
+
+    [Fact]
+    public async Task GetValidAccessTokenAsync_ReusesCachedToken_WhenNotExpired()
+    {
+        var cached = new StravaToken { AccessToken = "cached", RefreshToken = "r", ExpiresAt = DateTimeOffset.UtcNow.AddHours(1).ToUnixTimeSeconds() };
+        await File.WriteAllTextAsync(_tokenFile, JsonSerializer.Serialize(cached));
+        var provider = CreateProvider(HttpStatusCode.InternalServerError, "", out var handler);
+
+        var token = await provider.GetValidAccessTokenAsync();
+
+        Assert.Equal("cached", token);
+        Assert.Empty(handler.Requests);
+    }
+
+    [Fact]
+    public async Task GetValidAccessTokenAsync_RefreshesAndPersists_WhenTokenExpired()
+    {
+        var expired = new StravaToken { AccessToken = "old", RefreshToken = "stored-refresh", ExpiresAt = 0 };
+        await File.WriteAllTextAsync(_tokenFile, JsonSerializer.Serialize(expired));
+        var expiresAt = DateTimeOffset.UtcNow.AddHours(6).ToUnixTimeSeconds();
+        var provider = CreateProvider(HttpStatusCode.OK,
+            $$"""{ "access_token": "fresh", "refresh_token": "next-refresh", "expires_at": {{expiresAt}} }""", out var handler);
+
+        var token = await provider.GetValidAccessTokenAsync();
+
+        Assert.Equal("fresh", token);
+        var request = Assert.Single(handler.Requests);
+        Assert.Equal(HttpMethod.Post, request.Method);
+        Assert.Contains("refresh_token=stored-refresh", request.Body); // le refresh token persistant prime sur la config
+        var persisted = JsonSerializer.Deserialize<StravaToken>(await File.ReadAllTextAsync(_tokenFile))!;
+        Assert.Equal("next-refresh", persisted.RefreshToken);
     }
 
     [Fact]
@@ -84,9 +191,9 @@ public class StravaProviderTests
     }
 
     [Fact]
-    public async Task GetActivityStreamsAsync_ReturnsEmptyList_WhenHttpCallFails()
+    public async Task GetActivityStreamsAsync_ReturnsEmptyList_ForManualActivitiesWithoutStreams()
     {
-        var provider = CreateProvider(HttpStatusCode.Unauthorized, "{}", out _);
+        var provider = CreateProvider(HttpStatusCode.NotFound, "{}", out _);
         var points = await provider.GetActivityStreamsAsync("123", "token");
 
         Assert.Empty(points);

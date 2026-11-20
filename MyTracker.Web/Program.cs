@@ -1,5 +1,6 @@
-using MyTracker.Web.Components; // Vérifie que c'est le bon namespace pour tes composants
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Options;
+using MyTracker.Web.Components;
 using MyTracker.Domain.Configurations;
 using MyTracker.Domain.Interfaces;
 using MyTracker.Domain.Services;
@@ -7,37 +8,50 @@ using MyTracker.Infrastructure.External;
 using MyTracker.Infrastructure.Csv;
 using MyTracker.Infrastructure.Persistence;
 
-// 1. On crée le fameux "builder"
+// 1. Hôte web
 var builder = WebApplication.CreateBuilder(args);
 builder.WebHost.UseUrls("http://0.0.0.0:5215");
 
-// 2. On ajoute les services de base de Blazor
+// 2. Blazor Server (composants interactifs côté serveur)
 builder.Services.AddRazorComponents()
     .AddInteractiveServerComponents();
 
-// 3. Configuration Strava (Récupérée depuis appsettings.json / user-secrets)
-var stravaSettings = builder.Configuration.GetSection("Strava").Get<StravaSettings>();
-if (stravaSettings == null) throw new Exception("La section 'Strava' est manquante dans appsettings.json");
-
-var ollamaSettings = builder.Configuration.GetSection("Ollama").Get<OllamaSettings>() ?? new OllamaSettings();
+// 3. Configuration typée, validée au démarrage (DataAnnotations) : l'application refuse de
+//    démarrer avec une configuration Strava incomplète plutôt que d'échouer au premier appel.
+builder.Services.AddOptions<StravaSettings>()
+    .Bind(builder.Configuration.GetSection(StravaSettings.SectionName))
+    .ValidateDataAnnotations()
+    .ValidateOnStart();
+builder.Services.AddOptions<OllamaSettings>()
+    .Bind(builder.Configuration.GetSection(OllamaSettings.SectionName))
+    .ValidateDataAnnotations()
+    .ValidateOnStart();
+// Le domaine consomme les POCO de configuration sans dépendre de Microsoft.Extensions.Options.
+builder.Services.AddSingleton(sp => sp.GetRequiredService<IOptions<StravaSettings>>().Value);
+builder.Services.AddSingleton(sp => sp.GetRequiredService<IOptions<OllamaSettings>>().Value);
 
 // 4. Base de données SQLite (cache local des activités, points de séance, commentaires IA)
 var connectionString = TrainingTrackerDbPath.ResolveConnectionString(
     builder.Configuration.GetConnectionString("TrainingTrackerDb"));
 builder.Services.AddDbContext<TrainingTrackerDbContext>(opts => opts.UseSqlite(connectionString));
 
-// 5. Injection de tes services (Le pont vers ton travail précédent)
-builder.Services.AddSingleton(stravaSettings);
-builder.Services.AddSingleton(ollamaSettings);
+// 5. Adaptateurs d'infrastructure (ports définis dans le domaine)
 builder.Services.AddHttpClient<IActivityProvider, StravaProvider>();
 builder.Services.AddHttpClient<IOllamaService, OllamaClient>();
 builder.Services.AddScoped<IActivityRepository, SqliteActivityRepository>();
 builder.Services.AddScoped<IActivityCommentaryRepository, SqliteActivityCommentaryRepository>();
 builder.Services.AddScoped<IUserProfileRepository, SqliteUserProfileRepository>();
 builder.Services.AddSingleton<ICsvExportService, CsvExportService>();
-builder.Services.AddScoped<ActivityService>();
+builder.Services.AddSingleton(TimeProvider.System);
 
-// 6. On construit l'application
+// Services applicatifs (un par responsabilité)
+builder.Services.AddScoped<ActivityImportService>();
+builder.Services.AddScoped<ActivityQueryService>();
+builder.Services.AddScoped<CoachingService>();
+builder.Services.AddScoped<ActivityExportService>();
+builder.Services.AddScoped<UserProfileService>();
+
+// 6. Construction de l'application
 var app = builder.Build();
 
 // 7. Application des migrations EF Core au démarrage
@@ -58,7 +72,7 @@ app.UseHttpsRedirection();
 app.UseStaticFiles();
 app.UseAntiforgery();
 
-// 9. On mappe les composants Razor
+// 9. Routage des composants Razor
 app.MapRazorComponents<App>()
     .AddInteractiveServerRenderMode();
 

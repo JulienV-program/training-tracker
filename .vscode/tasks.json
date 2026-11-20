@@ -7,35 +7,28 @@
             "type": "process",
             "args": [
                 "build",
-                "${workspaceFolder}/MyTracker.App/MyTracker.App.csproj",
+                "${workspaceFolder}/trainingtracker.sln",
                 "/property:GenerateFullPaths=true",
                 "/consoleloggerparameters:NoSummary;ForceNoAlign"
             ],
-            "problemMatcher": "$msCompile"
+            "problemMatcher": "$msCompile",
+            "group": { "kind": "build", "isDefault": true }
         },
         {
-            "label": "publish",
+            "label": "test",
             "command": "dotnet",
             "type": "process",
-            "args": [
-                "publish",
-                "${workspaceFolder}/MyTracker.App/MyTracker.App.csproj",
-                "/property:GenerateFullPaths=true",
-                "/consoleloggerparameters:NoSummary;ForceNoAlign"
-            ],
-            "problemMatcher": "$msCompile"
+            "args": ["test", "${workspaceFolder}/trainingtracker.sln"],
+            "problemMatcher": "$msCompile",
+            "group": { "kind": "test", "isDefault": true }
         },
         {
-            "label": "watch",
+            "label": "watch web",
             "command": "dotnet",
             "type": "process",
-            "args": [
-                "watch",
-                "run",
-                "--project",
-                "${workspaceFolder}/MyTracker.App/MyTracker.App.csproj"
-            ],
-            "problemMatcher": "$msCompile"
+            "args": ["watch", "run", "--project", "${workspaceFolder}/MyTracker.Web/MyTracker.Web.csproj"],
+            "problemMatcher": "$msCompile",
+            "isBackground": true
         }
     ]
 }

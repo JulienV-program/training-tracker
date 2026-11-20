@@ -1,4 +1,5 @@
 using Microsoft.EntityFrameworkCore;
+using MyTracker.Domain.Exceptions;
 using MyTracker.Domain.Interfaces;
 using MyTracker.Domain.Models;
 using MyTracker.Infrastructure.Persistence.Entities;
@@ -104,7 +105,7 @@ public class SqliteActivityRepository(TrainingTrackerDbContext db) : IActivityRe
     public async Task SaveActivityDetailAsync(ActivityDetail detail)
     {
         var entity = await db.Activities.FindAsync(detail.ActivityId)
-            ?? throw new Exception("Activité introuvable en cache pour enregistrer le détail.");
+            ?? throw new ActivityNotFoundException(detail.ActivityId, "cache local, enregistrement du détail");
 
         entity.AverageSpeed = detail.AverageSpeed;
         entity.MaxSpeed = detail.MaxSpeed;

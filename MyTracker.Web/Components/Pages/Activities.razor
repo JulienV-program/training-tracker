@@ -1,7 +1,10 @@
 ﻿@page "/activities"
 @rendermode InteractiveServer
 @using MyTracker.Domain.Services
-@inject ActivityService ActivityService
+@using MyTracker.Domain.Models
+@inject ActivityImportService ImportService
+@inject ActivityQueryService QueryService
+@inject ILogger<Activities> Logger
 @inject NavigationManager Nav
 
 <div class="container mt-4">
@@ -71,18 +74,18 @@
 </div>
 
 @code {
-    private List<ActivityService.ActivityViewModel>? activities;
+    private IReadOnlyList<ActivityListItem>? activities;
     private bool isLoading = false;
     private string? errorMessage;
 
     protected override async Task OnInitializedAsync()
     {
         // Lecture depuis le cache local SQLite, aucun appel Strava ici
-        activities = await ActivityService.GetActivitiesDashboardAsync();
+        activities = await QueryService.GetActivityListAsync();
     }
 
     private async Task RefreshFromCache()
-        => activities = await ActivityService.GetActivitiesDashboardAsync();
+        => activities = await QueryService.GetActivityListAsync();
 
     private async Task LoadActivities()
     {
@@ -90,12 +93,12 @@
         errorMessage = null;
         try
         {
-            await ActivityService.SyncActivitiesListAsync(); // Appel Strava, fusionne dans le cache local
+            await ImportService.SyncActivitiesListAsync(); // Appel Strava, fusionne dans le cache local
             await RefreshFromCache();
         }
         catch (Exception ex)
         {
-            errorMessage = $"Impossible de synchroniser avec Strava : {ex.Message}";
+            errorMessage = UserFacingError.Describe(ex, Logger, "Impossible de synchroniser avec Strava");
         }
         finally
         {
@@ -108,12 +111,12 @@
         errorMessage = null;
         try
         {
-            await ActivityService.GetActivityCsvAsync(id); // Télécharge et stocke sur le Mac
+            await ImportService.GetOrImportDataPointsAsync(id); // Import détaillé dans le cache local
             await RefreshFromCache(); // Rafraîchit l'UI depuis le cache, pas de nouvel appel Strava
         }
         catch (Exception ex)
         {
-            errorMessage = $"Impossible d'importer cette activité : {ex.Message}";
+            errorMessage = UserFacingError.Describe(ex, Logger, "Impossible d'importer cette activité");
         }
     }
 
@@ -123,12 +126,12 @@
         errorMessage = null;
         try
         {
-            await ActivityService.GetActivityDataPointsAsync(id, forceReimport: true);
+            await ImportService.GetOrImportDataPointsAsync(id, forceReimport: true);
             await RefreshFromCache();
         }
         catch (Exception ex)
         {
-            errorMessage = $"Impossible de réimporter cette activité : {ex.Message}";
+            errorMessage = UserFacingError.Describe(ex, Logger, "Impossible de réimporter cette activité");
         }
         finally
         {

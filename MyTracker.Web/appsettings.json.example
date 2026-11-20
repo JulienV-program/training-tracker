@@ -9,7 +9,10 @@
   "Strava": {
     "ClientId": "<your-strava-client-id>",
     "ClientSecret": "<your-strava-client-secret>",
-    "RefreshToken": "<your-strava-refresh-token>"
+    "RefreshToken": "<your-strava-refresh-token>",
+    "TokenFilePath": null,
+    "ActivitiesPageSize": 100,
+    "MaxActivityPages": 10
   },
   "Ollama": {
     "BaseUrl": "http://localhost:11434",

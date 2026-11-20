@@ -1,6 +1,8 @@
 using System.Net.Http.Json;
 using System.Text;
+using Microsoft.Extensions.Logging;
 using MyTracker.Domain.Configurations;
+using MyTracker.Domain.Exceptions;
 using MyTracker.Domain.Interfaces;
 using MyTracker.Domain.Models;
 
@@ -9,12 +11,16 @@ namespace MyTracker.Infrastructure.External;
 public class OllamaClient : IOllamaService
 {
     private readonly HttpClient _httpClient;
-    private readonly OllamaSettings _settings;
+    private const string ServiceName = "Ollama";
 
-    public OllamaClient(HttpClient httpClient, OllamaSettings settings)
+    private readonly OllamaSettings _settings;
+    private readonly ILogger<OllamaClient> _logger;
+
+    public OllamaClient(HttpClient httpClient, OllamaSettings settings, ILogger<OllamaClient> logger)
     {
         _httpClient = httpClient;
         _settings = settings;
+        _logger = logger;
         _httpClient.BaseAddress = new Uri(_settings.BaseUrl);
         _httpClient.Timeout = TimeSpan.FromSeconds(_settings.TimeoutSeconds);
     }
@@ -24,11 +30,42 @@ public class OllamaClient : IOllamaService
         var prompt = BuildPrompt(activity, dataPoints, profile);
         var payload = new { model = _settings.Model, prompt, stream = false };
 
-        var response = await _httpClient.PostAsJsonAsync("/api/generate", payload, ct);
-        response.EnsureSuccessStatusCode();
+        HttpResponseMessage response;
+        try
+        {
+            response = await _httpClient.PostAsJsonAsync("/api/generate", payload, ct);
+        }
+        catch (HttpRequestException ex)
+        {
+            throw new ExternalServiceException(ServiceName,
+                $"serveur injoignable sur {_settings.BaseUrl} (lancer `ollama serve`)", innerException: ex);
+        }
+        catch (TaskCanceledException ex) when (!ct.IsCancellationRequested)
+        {
+            throw new ExternalServiceException(ServiceName,
+                $"pas de réponse après {_settings.TimeoutSeconds} s (modèle trop lourd ?)", innerException: ex);
+        }
 
-        var result = await response.Content.ReadFromJsonAsync<OllamaGenerateResponse>(cancellationToken: ct);
-        return result?.response?.Trim() ?? throw new Exception("Réponse vide d'Ollama.");
+        using (response)
+        {
+            if (!response.IsSuccessStatusCode)
+            {
+                var body = await response.Content.ReadAsStringAsync(ct);
+                _logger.LogWarning("Échec Ollama : HTTP {Status} {Body}", (int)response.StatusCode, body);
+                var reason = response.StatusCode == System.Net.HttpStatusCode.NotFound
+                    ? $"modèle '{_settings.Model}' introuvable (lancer `ollama pull {_settings.Model}`)"
+                    : $"erreur HTTP {(int)response.StatusCode}";
+                throw new ExternalServiceException(ServiceName, reason, response.StatusCode);
+            }
+
+            var result = await response.Content.ReadFromJsonAsync<OllamaGenerateResponse>(cancellationToken: ct);
+            var text = result?.response?.Trim();
+            if (string.IsNullOrEmpty(text))
+                throw new ExternalServiceException(ServiceName, "réponse vide du modèle");
+
+            _logger.LogDebug("Commentaire généré par {Model} ({Length} caractères)", _settings.Model, text.Length);
+            return text;
+        }
     }
 
     private static string BuildPrompt(Activity activity, IEnumerable<ActivityDataPoint> dataPoints, UserProfile? profile)

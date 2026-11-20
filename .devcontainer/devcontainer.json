@@ -11,8 +11,11 @@
         }
     },
     "remoteUser": "vscode",
+    // Les secrets ne sont jamais écrits ici : ils sont relayés depuis l'environnement de la machine hôte.
+    // Définir Strava__ClientId / Strava__ClientSecret / Strava__RefreshToken sur l'hôte avant d'ouvrir le conteneur.
     "containerEnv": {
-    "STRAVA_CLIENT_ID": "${localEnv:STRAVA_CLIENT_ID}",
-    "STRAVA_CLIENT_SECRET": "${localEnv:STRAVA_CLIENT_SECRET}"
-}
+        "Strava__ClientId": "${localEnv:Strava__ClientId}",
+        "Strava__ClientSecret": "${localEnv:Strava__ClientSecret}",
+        "Strava__RefreshToken": "${localEnv:Strava__RefreshToken}"
+    }
 }

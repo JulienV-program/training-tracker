@@ -2,7 +2,10 @@
 @rendermode InteractiveServer
 @using MyTracker.Domain.Services
 @using System.Text.Json
-@inject ActivityService ActivityService
+@inject ActivityImportService ImportService
+@inject ActivityQueryService QueryService
+@inject CoachingService CoachingService
+@inject ILogger<Visualizer> Logger
 @inject IJSRuntime JS
 
 <PageTitle>Analyse Graphique</PageTitle>
@@ -12,6 +15,11 @@
         <h3>📈 Analyse de la séance @ActivityId</h3>
         <a href="/activities" class="btn btn-outline-secondary">Retour</a>
     </div>
+
+    @if (loadError != null)
+    {
+        <div class="alert alert-danger mt-4">@loadError</div>
+    }
 
     <div class="chart-card mt-4" style="height: 500px;">
         <canvas id="stravaChart"></canvas>
@@ -49,6 +57,7 @@
     [Parameter] public required string ActivityId { get; set; }
 
     private string? commentary;
+    private string? loadError;
     private bool isGeneratingCommentary;
 
     private static readonly JsonSerializerOptions JsonOptions = new() { PropertyNamingPolicy = JsonNamingPolicy.CamelCase };
@@ -57,8 +66,24 @@
     {
         if (!firstRender) return;
 
-        var dataPoints = (await ActivityService.GetActivityDataPointsAsync(ActivityId)).ToList();
-        var activity = await ActivityService.GetCachedActivityAsync(ActivityId);
+        try
+        {
+            await RenderChartsAsync();
+        }
+        catch (Exception ex)
+        {
+            loadError = UserFacingError.Describe(ex, Logger, "Impossible de charger cette séance");
+            StateHasChanged();
+            return;
+        }
+
+        await GenerateCommentaryAsync(forceRegenerate: false);
+    }
+
+    private async Task RenderChartsAsync()
+    {
+        var dataPoints = (await ImportService.GetOrImportDataPointsAsync(ActivityId)).ToList();
+        var activity = await QueryService.GetActivityAsync(ActivityId);
 
         // Strava renvoie la cadence course à pied pour une seule jambe : on double pour obtenir les pas/minute réels
         var isRunningActivity = activity?.Type is "Run" or "TrailRun" or "VirtualRun" or "Walk" or "Hike";
@@ -73,14 +98,12 @@
         var json = JsonSerializer.Serialize(chartPoints, JsonOptions);
         await JS.InvokeVoidAsync("renderStravaChart", json, speedLabel, speedUnit);
 
-        var splits = (await ActivityService.GetActivitySplitsAsync(ActivityId))
+        var splits = (await QueryService.GetSplitsAsync(ActivityId))
             .Select(s => s with { AverageSpeed = ConvertSpeed(s.AverageSpeed, speedUnit) ?? 0 });
         await JS.InvokeVoidAsync("renderSplitsChart", JsonSerializer.Serialize(splits, JsonOptions), speedLabel, speedUnit);
 
         var route = dataPoints.Where(p => p.Lat.HasValue && p.Lng.HasValue).Select(p => new { p.Lat, p.Lng });
         await JS.InvokeVoidAsync("renderRouteMap", JsonSerializer.Serialize(route, JsonOptions));
-
-        await GenerateCommentaryAsync(forceRegenerate: false);
     }
 
     // Vitesse/allure affichée différemment selon le type de sport : km/h à vélo, min/km à pied, min/100m en natation
@@ -112,11 +135,11 @@
         StateHasChanged();
         try
         {
-            commentary = await ActivityService.GetOrGenerateCommentaryAsync(ActivityId, forceRegenerate);
+            commentary = await CoachingService.GetOrGenerateCommentaryAsync(ActivityId, forceRegenerate);
         }
         catch (Exception ex)
         {
-            commentary = $"Impossible de générer le commentaire IA : {ex.Message}";
+            commentary = UserFacingError.Describe(ex, Logger, "Impossible de générer le commentaire IA");
         }
         finally
         {

@@ -2,7 +2,7 @@
 @rendermode InteractiveServer
 @using MyTracker.Domain.Models
 @using MyTracker.Domain.Services
-@inject ActivityService ActivityService
+@inject UserProfileService ProfileService
 
 <PageTitle>Mon Profil</PageTitle>
 
@@ -103,7 +103,7 @@
 
     protected override async Task OnInitializedAsync()
     {
-        var profile = await ActivityService.GetUserProfileAsync();
+        var profile = await ProfileService.GetProfileAsync();
         if (profile != null)
         {
             age = profile.Age;
@@ -126,7 +126,7 @@
             var vmaMinPerKm = ToDecimalMinutes(vmaMinutes, vmaSeconds);
             var criticalSwimSpeedMinPer100m = ToDecimalMinutes(cssMinutes, cssSeconds);
             var profile = new UserProfile(age, sex, heightCm, weightKg, maxHeartRate, restingHeartRate, ftpWatts, vmaMinPerKm, criticalSwimSpeedMinPer100m);
-            await ActivityService.SaveUserProfileAsync(profile);
+            await ProfileService.SaveProfileAsync(profile);
             savedMessage = "Profil enregistré.";
         }
         finally

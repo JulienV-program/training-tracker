@@ -1,5 +1,7 @@
 using System.Net;
+using Microsoft.Extensions.Logging.Abstractions;
 using MyTracker.Domain.Configurations;
+using MyTracker.Domain.Exceptions;
 using MyTracker.Domain.Models;
 using MyTracker.Infrastructure.External;
 using MyTracker.Infrastructure.Tests.TestUtilities;
@@ -16,9 +18,11 @@ public class OllamaClientTests
     private static OllamaClient CreateClient(HttpStatusCode statusCode, string responseContent, out FakeHttpMessageHandler handler)
     {
         handler = new FakeHttpMessageHandler(statusCode, responseContent);
-        var httpClient = new HttpClient(handler);
-        return new OllamaClient(httpClient, new OllamaSettings { Model = "test-model" });
+        return CreateClient(handler);
     }
+
+    private static OllamaClient CreateClient(FakeHttpMessageHandler handler)
+        => new(new HttpClient(handler), new OllamaSettings { Model = "test-model" }, NullLogger<OllamaClient>.Instance);
 
     [Fact]
     public async Task GenerateCommentaryAsync_ReturnsTrimmedResponseText()
@@ -37,7 +41,30 @@ public class OllamaClientTests
         const string json = """{ "model": "test-model", "done": true }""";
         var client = CreateClient(HttpStatusCode.OK, json, out _);
 
-        await Assert.ThrowsAsync<Exception>(() => client.GenerateCommentaryAsync(MakeActivity(), [], null));
+        await Assert.ThrowsAsync<ExternalServiceException>(() => client.GenerateCommentaryAsync(MakeActivity(), [], null));
+    }
+
+    [Fact]
+    public async Task GenerateCommentaryAsync_ExplainsMissingModel_WhenOllamaReturns404()
+    {
+        var client = CreateClient(HttpStatusCode.NotFound, """{ "error": "model not found" }""", out _);
+
+        var ex = await Assert.ThrowsAsync<ExternalServiceException>(() => client.GenerateCommentaryAsync(MakeActivity(), [], null));
+
+        Assert.Equal(HttpStatusCode.NotFound, ex.StatusCode);
+        Assert.Contains("ollama pull test-model", ex.Message);
+    }
+
+    [Fact]
+    public async Task GenerateCommentaryAsync_WrapsConnectionFailure_WhenOllamaIsNotRunning()
+    {
+        var handler = new FakeHttpMessageHandler(_ => throw new HttpRequestException("Connection refused"));
+        var client = CreateClient(handler);
+
+        var ex = await Assert.ThrowsAsync<ExternalServiceException>(() => client.GenerateCommentaryAsync(MakeActivity(), [], null));
+
+        Assert.Equal("Ollama", ex.ServiceName);
+        Assert.IsType<HttpRequestException>(ex.InnerException);
     }
 
     [Fact]
